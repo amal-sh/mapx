@@ -8,7 +8,7 @@
     <application
         android:label="MapX"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/launcher_icon">
         <!-- Tells the Play Store this app requires ARCore (Google Play Services
              for AR); paired with the uses-feature tag above. -->
         <meta-data android:name="com.google.ar.core" android:value="required" />

@@ -191,5 +191,65 @@ void main() {
       await tester.tap(find.byTooltip('Pause Walk'));
       await tester.pump();
     });
+
+    testWidgets('allows initializing with custom startNode and calculates direct route', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NavigationScreen(
+            repository: repo,
+            floor: floor,
+            destination: room101,
+            startNode: junction,
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      // Route should start from Corridor Junction directly to Room 101
+      expect(find.textContaining('Start from Corridor Junction'), findsOneWidget);
+      expect(find.textContaining('From: Corridor Junction'), findsWidgets);
+      expect(find.textContaining('Total: 6.0m to Room 101'), findsOneWidget);
+      expect(find.textContaining('2 waypoints'), findsOneWidget);
+    });
+
+    testWidgets('opens start location picker and changes starting location dynamically', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NavigationScreen(
+            repository: repo,
+            floor: floor,
+            destination: room101,
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      // Initial route from Entrance (total 14.0m)
+      expect(find.textContaining('From: Main Entrance'), findsWidgets);
+      expect(find.textContaining('Total: 14.0m to Room 101'), findsOneWidget);
+
+      // Tap 'Change' in HUD to open location picker bottom sheet
+      final changeBtn = find.text('Change');
+      expect(changeBtn, findsOneWidget);
+      await tester.tap(changeBtn);
+      await tester.pumpAndSettle();
+
+      // Verify bottom sheet opened
+      expect(find.text('Select Current Location'), findsOneWidget);
+      expect(find.text('Ground Floor • Navigating to Room 101'), findsOneWidget);
+
+      // Select 'Corridor Junction' from the list
+      final junctionTile = find.widgetWithText(InkWell, 'Corridor Junction');
+      expect(junctionTile, findsOneWidget);
+      await tester.tap(junctionTile);
+      await tester.pumpAndSettle();
+
+      // Bottom sheet closed and route recomputed from Corridor Junction
+      expect(find.text('Select Current Location'), findsNothing);
+      expect(find.textContaining('From: Corridor Junction'), findsWidgets);
+      expect(find.textContaining('Total: 6.0m to Room 101'), findsOneWidget);
+    });
   });
 }

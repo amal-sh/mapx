@@ -12,6 +12,10 @@ import '../models/floor.dart';
 import '../models/node.dart';
 import '../native/ar_bridge.dart';
 import '../native/camera_permission.dart';
+import '../widgets/mapping/grid_painter.dart';
+import '../widgets/mapping/mapping_controls_bar.dart';
+import '../widgets/mapping/mapping_inspector_sheet.dart';
+import '../widgets/mapping/node_form_dialog.dart';
 
 /// In-app AR Mapping tool for building administrators.
 ///
@@ -146,124 +150,13 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
   }
 
   void _showAddNodeDialog(Position position) {
-    final labelController = TextEditingController(
-      text: _nodes.isEmpty ? 'Entrance' : 'Room ${101 + _nodes.length}',
-    );
-    NodeType selectedType = _nodes.isEmpty ? NodeType.junction : NodeType.room;
-
-    showModalBottomSheet<void>(
+    NodeFormDialog.show(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            final colorScheme = Theme.of(context).colorScheme;
-
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-                left: 24,
-                right: 24,
-                top: 24,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Place Spatial Node',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: colorScheme.primaryContainer,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          '(${position.x.toStringAsFixed(1)}m, ${position.z.toStringAsFixed(1)}m)',
-                          style: TextStyle(
-                            color: colorScheme.onPrimaryContainer,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: labelController,
-                    autofocus: true,
-                    decoration: InputDecoration(
-                      labelText: 'Node Label / Room Number',
-                      hintText: 'e.g. 101, Lab 2, Main Entrance',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE4E4E7))),
-                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE4E4E7))),
-                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF09090B), width: 1.5)),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Node Type',
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: NodeType.values.map((type) {
-                      final isSelected = selectedType == type;
-                      return ChoiceChip(
-                        label: Text(type.name.toUpperCase()),
-                        selected: isSelected,
-                        selectedColor: const Color(0xFF09090B),
-                        backgroundColor: const Color(0xFFF4F4F5),
-                        labelStyle: TextStyle(
-                          color: isSelected ? Colors.white : const Color(0xFF09090B),
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
-                        ),
-                        side: BorderSide.none,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        onSelected: (val) {
-                          if (val) setModalState(() => selectedType = type);
-                        },
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      icon: const Icon(CupertinoIcons.map_pin_ellipse, size: 18),
-                      label: const Text('Confirm & Drop Node'),
-                      onPressed: () {
-                        final label = labelController.text.trim().isEmpty
-                            ? 'Node ${_nodes.length + 1}'
-                            : labelController.text.trim();
-                        Navigator.of(ctx).pop();
-                        _confirmDropNode(label, selectedType, position);
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
+      position: position,
+      suggestedLabel: _nodes.isEmpty ? 'Entrance' : 'Room ${101 + _nodes.length}',
+      initialType: _nodes.isEmpty ? NodeType.junction : NodeType.room,
+      onConfirm: (label, type) {
+        _confirmDropNode(label, type, position);
       },
     );
   }
@@ -443,131 +336,16 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
   }
 
   void _showInspector() {
-    showModalBottomSheet<void>(
+    MappingInspectorSheet.show(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setInspectorState) {
-            final colorScheme = Theme.of(context).colorScheme;
-
-            return DraggableScrollableSheet(
-              expand: false,
-              initialChildSize: 0.6,
-              maxChildSize: 0.9,
-              minChildSize: 0.4,
-              builder: (_, scrollController) {
-                return Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Center(
-                        child: Container(
-                          width: 40,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: colorScheme.outlineVariant,
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Floor Graph Inspector',
-                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                ),
-                          ),
-                          Text(
-                            '${_nodes.length} Nodes • ${_edges.length} Edges',
-                            style: TextStyle(
-                              color: colorScheme.onSurfaceVariant,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      Expanded(
-                        child: _nodes.isEmpty
-                            ? const Center(child: Text('No nodes placed yet. Tap the AR screen to add.'))
-                            : ListView.separated(
-                                controller: scrollController,
-                                itemCount: _nodes.length,
-                                separatorBuilder: (_, _) => const Divider(height: 1),
-                                itemBuilder: (context, idx) {
-                                  final node = _nodes[idx];
-                                  final connectedEdges = _edges.where(
-                                    (e) => e.fromNodeId == node.id || e.toNodeId == node.id,
-                                  );
-
-                                  return ListTile(
-                                    contentPadding: EdgeInsets.zero,
-                                    leading: CircleAvatar(
-                                      backgroundColor: colorScheme.primaryContainer,
-                                      child: Text(
-                                        '${idx + 1}',
-                                        style: TextStyle(
-                                          color: colorScheme.onPrimaryContainer,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                    title: Text(
-                                      node.label,
-                                      style: const TextStyle(fontWeight: FontWeight.w600),
-                                    ),
-                                    subtitle: Text(
-                                      '${node.type.name} • (${node.position.x.toStringAsFixed(1)}m, ${node.position.z.toStringAsFixed(1)}m) • ${connectedEdges.length} links',
-                                      style: const TextStyle(fontSize: 12),
-                                    ),
-                                    trailing: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        IconButton(
-                                          icon: Icon(
-                                            CupertinoIcons.link,
-                                            size: 20,
-                                            color: _linkSourceNode?.id == node.id
-                                                ? colorScheme.primary
-                                                : colorScheme.onSurfaceVariant,
-                                          ),
-                                          onPressed: () {
-                                            Navigator.of(ctx).pop();
-                                            setState(() => _isLinkingMode = true);
-                                            _startManualLink(node);
-                                          },
-                                        ),
-                                        IconButton(
-                                          icon: const Icon(CupertinoIcons.trash, size: 18, color: Color(0xFFDC2626)),
-                                          onPressed: () {
-                                            _deleteNode(node);
-                                            setInspectorState(() {});
-                                          },
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                },
-                              ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            );
-          },
-        );
+      nodes: _nodes,
+      edges: _edges,
+      linkSourceNode: _linkSourceNode,
+      onStartLink: (node) {
+        setState(() => _isLinkingMode = true);
+        _startManualLink(node);
       },
+      onDeleteNode: _deleteNode,
     );
   }
 
@@ -670,7 +448,7 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                           GestureDetector(
                             onTapUp: (details) => _handleViewportTap(details, constraints),
                             child: CustomPaint(
-                              painter: _GridPainter(
+                              painter: GridPainter(
                                 nodes: _nodes,
                                 edges: _edges,
                                 selectedNode: _linkSourceNode,
@@ -823,103 +601,23 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                       bottom: 24,
                       left: 20,
                       right: 20,
-                      child: Card(
-                        color: Colors.black.withValues(alpha: 0.85),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                          side: const BorderSide(color: Colors.white12),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(12),
-                                  onTap: () {
-                                    _showAddNodeDialog(
-                                      Position(
-                                        x: (_nodes.length * 2.5),
-                                        y: 0,
-                                        z: 0,
-                                      ),
-                                    );
-                                  },
-                                  child: const Padding(
-                                    padding: EdgeInsets.symmetric(vertical: 4),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(CupertinoIcons.map_pin_ellipse, color: Colors.white, size: 20),
-                                        SizedBox(height: 3),
-                                        Text('Add Node', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              Container(height: 24, width: 1, color: Colors.white24),
-                              Expanded(
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(12),
-                                  onTap: _nodes.length < 2
-                                      ? null
-                                      : () {
-                                          setState(() => _isLinkingMode = !_isLinkingMode);
-                                          _showInspector();
-                                        },
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 4),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          CupertinoIcons.waveform_path,
-                                          color: _nodes.length < 2
-                                              ? Colors.white38
-                                              : (_isLinkingMode ? Colors.white : Colors.white70),
-                                          size: 20,
-                                        ),
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          'Link Edge',
-                                          style: TextStyle(
-                                            color: _nodes.length < 2
-                                                ? Colors.white38
-                                                : (_isLinkingMode ? Colors.white : Colors.white70),
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              Container(height: 24, width: 1, color: Colors.white24),
-                              Expanded(
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(12),
-                                  onTap: _showInspector,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 4),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const Icon(CupertinoIcons.list_bullet, color: Colors.white, size: 20),
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          '${_nodes.length} Nodes',
-                                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                      child: MappingControlsBar(
+                        nodeCount: _nodes.length,
+                        isLinkingMode: _isLinkingMode,
+                        onAddNode: () {
+                          _showAddNodeDialog(
+                            Position(
+                              x: (_nodes.length * 2.5),
+                              y: 0,
+                              z: 0,
+                            ),
+                          );
+                        },
+                        onToggleLinkingMode: () {
+                          setState(() => _isLinkingMode = !_isLinkingMode);
+                          _showInspector();
+                        },
+                        onOpenInspector: _showInspector,
                       ),
                     ),
                   ],
@@ -928,79 +626,4 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
             ),
     );
   }
-}
-
-/// Canvas painter that visualizes placed nodes and connected edges in real time.
-class _GridPainter extends CustomPainter {
-  final List<MapNode> nodes;
-  final List<MapEdge> edges;
-  final MapNode? selectedNode;
-
-  _GridPainter({
-    required this.nodes,
-    required this.edges,
-    this.selectedNode,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (nodes.isEmpty) return;
-
-    final centerX = size.width / 2;
-    final centerY = size.height / 2;
-    const scale = 25.0; // Pixels per meter
-
-    final linePaint = Paint()
-      ..color = const Color(0xFF38BDF8).withValues(alpha: 0.8)
-      ..strokeWidth = 2.5
-      ..style = PaintingStyle.stroke;
-
-    final nodeMap = {for (final n in nodes) n.id: n};
-
-    // Draw Edges
-    for (final edge in edges) {
-      final from = nodeMap[edge.fromNodeId];
-      final to = nodeMap[edge.toNodeId];
-      if (from == null || to == null) continue;
-
-      final p1 = Offset(centerX + from.position.x * scale, centerY + from.position.z * scale);
-      final p2 = Offset(centerX + to.position.x * scale, centerY + to.position.z * scale);
-
-      canvas.drawLine(p1, p2, linePaint);
-    }
-
-    // Draw Nodes
-    for (int i = 0; i < nodes.length; i++) {
-      final node = nodes[i];
-      final isSelected = selectedNode?.id == node.id;
-      final offset = Offset(centerX + node.position.x * scale, centerY + node.position.z * scale);
-
-      final nodePaint = Paint()
-        ..color = isSelected
-            ? const Color(0xFFF59E0B)
-            : (node.type == NodeType.room ? const Color(0xFF2563EB) : const Color(0xFF10B981))
-        ..style = PaintingStyle.fill;
-
-      canvas.drawCircle(offset, isSelected ? 9.0 : 6.5, nodePaint);
-
-      // Label text
-      final textSpan = TextSpan(
-        text: node.label,
-        style: const TextStyle(
-          color: Colors.white70,
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-        ),
-      );
-      final textPainter = TextPainter(
-        text: textSpan,
-        textDirection: TextDirection.ltr,
-      )..layout();
-
-      textPainter.paint(canvas, Offset(offset.dx - textPainter.width / 2, offset.dy + 8));
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _GridPainter oldDelegate) => true;
 }
