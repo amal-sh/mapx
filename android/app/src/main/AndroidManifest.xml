@@ -6,7 +6,7 @@
     <uses-feature android:name="android.hardware.camera.ar" android:required="true" />
 
     <application
-        android:label="mapx"
+        android:label="MapX"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <!-- Tells the Play Store this app requires ARCore (Google Play Services

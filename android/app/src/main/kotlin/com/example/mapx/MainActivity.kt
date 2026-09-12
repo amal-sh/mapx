@@ -7,5 +7,12 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         ArBridge(flutterEngine).register()
+        flutterEngine
+            .platformViewsController
+            .registry
+            .registerViewFactory(
+                "mapx/ar_scene_view",
+                ArScenePlatformViewFactory(flutterEngine.dartExecutor.binaryMessenger)
+            )
     }
 }

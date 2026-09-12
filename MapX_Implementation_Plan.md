@@ -49,7 +49,7 @@ A detailed review of the workspace against the original phases:
 | **Phase 1: Map Data & Storage** | 🟢 **Complete (100%)** | `lib/models/`, `lib/data/local_map_repository.dart`, `test/local_map_repository_test.dart` | Graph models (`Building`, `Floor`, `MapNode`, `MapEdge`) with `toJson()`/`fromJson()`. `LocalMapRepository` implemented with JSON disk persistence and seeded CUSAT IT block. Unit tested with 100% coverage. |
 | **Phase 2: Admin AR Mapping Mode** | 🟢 **Complete (100%)** | `lib/screens/admin_mapping_screen.dart`, `ArBridge.kt`, `test/admin_mapping_test.dart` | Admin mapping screen with plane hit-testing, room labeling, combined auto-breadcrumb + manual edge linking, graph inspector, and saving to `LocalMapRepository`. |
 | **Phase 3: A* Pathfinding** | 🟢 **Complete (100%)** | `lib/logic/pathfinder.dart`, `test/pathfinder_test.dart` | Pure Dart A* implementation using `PriorityQueue` and admissible Euclidean heuristic. Fully tested with 7 unit tests covering branches, dead-ends, and edge cases. Dynamic start node resolution integrated. |
-| **Phase 4: AR Navigation & Path Rendering** | 🔴 **Pending (Next Phase)** | `lib/screens/navigation_screen.dart` | Currently has placeholder black container. Needs SceneView integration, Bezier smoothing in Dart, and AR directional arrow placement along the computed path. |
+| **Phase 4: AR Navigation & Path Rendering** | 🟢 **Complete (100%)** | `lib/logic/bezier_smoother.dart`, `lib/screens/navigation_screen.dart`, `ArScenePlatformView.kt`, `test/bezier_smoother_test.dart`, `test/navigation_screen_test.dart` | Quadratic Bezier smoothing with wall-safe corner clamping, native Android `ArScenePlatformView` with ARCore Depth API occlusion and vertical plane wall detection, turn-by-turn HUD, and dynamic obstacle awareness. |
 | **Phase 5: OCR Localization & Drift Check** | 🔴 **Pending** | `ArBridge.kt` (`ocrMatch` stub) | Needs MLKit Text Recognition on camera frames, fuzzy matching against mapped room labels, and AR pose anchoring. |
 | **Phase 6: Multi-Floor Transitions** | 🔴 **Pending** | — | Handoff prompts at stairs/elevators between floor graphs. |
 | **Phase 7: Polish & Optimization** | 🔴 **Pending** | — | UI/UX refinements, thermal/battery profiling, error handling. |
@@ -171,13 +171,17 @@ Staff maps real buildings by walking through them with the phone:
 - Handles multi-path networks, alternative corridors, and dead ends seamlessly.
 - **Deliverable:** Instant shortest-path calculation between any two selected nodes on dynamically mapped floors.
 
-### Phase 4 — Bezier Smoothing & AR Arrow Rendering (Next Phase)
-- **Bezier Smoothing (Dart):** Raw A* waypoints (straight node-to-node line segments) are smoothed using quadratic Bezier curve interpolation to prevent jagged 90-degree turns.
-- **SceneView Integration (Android):**
-  - Integrate SceneView / Filament in native Android.
-  - Render 3D directional animated arrows floating at walking eye-level (~0.5m – 1.0m above floor) pointing toward the next waypoint.
-  - As user moves forward, update proximity and clear passed arrows.
-- **Deliverable:** User selects destination; app displays camera feed with smooth 3D AR arrows guiding the user through the mapped corridor.
+### Phase 4 — Bezier Smoothing & AR Arrow Rendering (Complete — 100%)
+- **Bezier Smoothing (Dart):** Raw A* waypoints smoothed using quadratic Bezier curve interpolation with adaptive wall-safe corner clamping ($r \le 1.0\text{m}$, bounded to 35% of adjacent segment lengths) to prevent clipping through corner walls.
+- **SceneView / PlatformView Integration (Android):**
+  - Integrated native `ArScenePlatformView` (`mapx/ar_scene_view`) with ARCore session.
+  - Horizontal and vertical plane detection (floors and walls).
+  - Configured ARCore Depth API in `AUTOMATIC` mode (`Config.DepthMode.AUTOMATIC`) for realistic 3D depth occlusion behind walls, pillars, and pedestrians.
+- **Navigation HUD & Guidance:**
+  - Live turn-by-turn navigation HUD with distance countdown, turn directions, remaining distance, and AR tracking status.
+  - Dynamic obstacle detection warning alert support.
+  - Interactive 3D perspective AR simulation fallback for non-Android / test environments.
+- **Deliverable:** User selects destination; app displays camera feed with smooth 3D AR arrows guiding the user through the mapped corridor with depth occlusion behind real-world walls and objects.
 
 ### Phase 5 — OCR-Based Initialization & Drift Correction
 - **MLKit Text Recognition:** Process ARCore camera frames periodically (throttled at ~2–3 Hz or on demand to save battery).
@@ -259,7 +263,7 @@ Staff maps real buildings by walking through them with the phone:
 - [x] **Dynamic Data Layer (Phase 1 — Complete):** Model serialization (`toJson`/`fromJson`), Euclidean distance helper, and `LocalMapRepository` with local JSON file persistence.
 - [x] **Admin AR Mapping Tool (Phase 2 — Complete):** In-app AR mapping mode with plane hit-testing, room labeling, combined mode (auto-breadcrumb + manual edge linking), and graph inspector.
 - [x] **A* Pathfinding (Phase 3 — Complete):** Pure Dart shortest path implementation with admissible Euclidean heuristic and comprehensive unit test coverage.
-- [ ] **AR SceneView Path Rendering (Phase 4):** 3D animated arrows following Bezier-smoothed routes in camera viewport.
+- [x] **AR SceneView Path Rendering (Phase 4 — Complete):** 3D animated arrows following Bezier-smoothed routes with ARCore Depth API wall occlusion and turn-by-turn HUD guidance.
 - [ ] **MLKit OCR Localization (Phase 5):** Camera text recognition matching doorplates for automated "You Are Here" and drift correction.
 - [ ] **Doorway Drift Correction (Phase 5):** Automatic position recalibration when passing mapped doorway nodes.
 - [ ] **Multi-Floor Handoff (Phase 6):** Stairwell/elevator transitions and cross-floor navigation.
@@ -272,7 +276,7 @@ Staff maps real buildings by walking through them with the phone:
 - [ ] Hardcoded test graph, one real corridor, accessible via a clean repository interface
 - [ ] Working OCR-based "you are here" localization
 - [ ] A* pathfinding with unit tests
-- [ ] AR-rendered arrows following a Bezier-smoothed path
+- [x] AR-rendered arrows following a Bezier-smoothed path
 - [ ] Drift correction at doorways demonstrated on a long corridor
 - [ ] Floor-change handoff (stairs/elevator) demonstrated
 - [ ] Real building mapped via Admin Mapping tool, live in Firestore

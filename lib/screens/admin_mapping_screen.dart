@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
 import '../data/map_repository.dart';
@@ -45,18 +47,47 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
   int _planeCount = 0;
   StreamSubscription<ArEvent>? _arSubscription;
 
+  CameraController? _cameraController;
+  bool _cameraInitialized = false;
+
   @override
   void initState() {
     super.initState();
     _loadExistingGraph();
     _initAr();
+    _initCamera();
   }
 
   @override
   void dispose() {
     _arSubscription?.cancel();
+    _cameraController?.dispose();
     ArBridge.instance.stopMappingSession();
     super.dispose();
+  }
+
+  Future<void> _initCamera() async {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) return;
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) return;
+      final backCamera = cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.back,
+        orElse: () => cameras.first,
+      );
+      final controller = CameraController(
+        backCamera,
+        ResolutionPreset.high,
+        enableAudio: false,
+      );
+      await controller.initialize();
+      if (mounted) {
+        setState(() {
+          _cameraController = controller;
+          _cameraInitialized = true;
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadExistingGraph() async {
@@ -595,39 +626,61 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
               builder: (context, constraints) {
                 return Stack(
                   children: [
-                    // AR Viewfinder & Hit-Test Surface
-                    GestureDetector(
-                      onTapUp: (details) => _handleViewportTap(details, constraints),
-                      child: Container(
-                        width: double.infinity,
-                        height: double.infinity,
-                        color: const Color(0xFF0F172A), // Dark slate viewport
-                        child: CustomPaint(
-                          painter: _GridPainter(
-                            nodes: _nodes,
-                            edges: _edges,
-                            selectedNode: _linkSourceNode,
-                          ),
-                          child: Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  _isLinkingMode ? Icons.touch_app : Icons.add_circle_outline,
-                                  color: Colors.white24,
-                                  size: 40,
+                    // AR Live Camera Viewfinder & Hit-Test Surface
+                    Positioned.fill(
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          if (_cameraInitialized && _cameraController != null)
+                            FittedBox(
+                              fit: BoxFit.cover,
+                              child: SizedBox(
+                                width: _cameraController!.value.previewSize?.height ?? constraints.maxWidth,
+                                height: _cameraController!.value.previewSize?.width ?? constraints.maxHeight,
+                                child: CameraPreview(_cameraController!),
+                              ),
+                            )
+                          else
+                            Container(color: const Color(0xFF0F172A)),
+
+                          GestureDetector(
+                            onTapUp: (details) => _handleViewportTap(details, constraints),
+                            child: CustomPaint(
+                              painter: _GridPainter(
+                                nodes: _nodes,
+                                edges: _edges,
+                                selectedNode: _linkSourceNode,
+                              ),
+                              child: Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      _isLinkingMode ? Icons.touch_app : Icons.add_circle_outline,
+                                      color: Colors.white70,
+                                      size: 44,
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withValues(alpha: 0.65),
+                                        borderRadius: BorderRadius.circular(16),
+                                        border: Border.all(color: Colors.white24),
+                                      ),
+                                      child: Text(
+                                        _isLinkingMode
+                                            ? 'Tap any node in inspector to link'
+                                            : 'Point camera at floor & tap to drop node',
+                                        style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  _isLinkingMode
-                                      ? 'Tap any node in inspector to link'
-                                      : 'Tap surface to drop a spatial node',
-                                  style: const TextStyle(color: Colors.white38, fontSize: 13),
-                                ),
-                              ],
+                              ),
                             ),
                           ),
-                        ),
+                        ],
                       ),
                     ),
 
@@ -752,44 +805,92 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                           side: const BorderSide(color: Colors.white12),
                         ),
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                           child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceAround,
                             children: [
-                              TextButton.icon(
-                                style: TextButton.styleFrom(foregroundColor: Colors.white),
-                                icon: const Icon(Icons.add_location_alt_outlined),
-                                label: const Text('Add Node'),
-                                onPressed: () {
-                                  _showAddNodeDialog(
-                                    Position(
-                                      x: (_nodes.length * 2.5),
-                                      y: 0,
-                                      z: 0,
+                              Expanded(
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(12),
+                                  onTap: () {
+                                    _showAddNodeDialog(
+                                      Position(
+                                        x: (_nodes.length * 2.5),
+                                        y: 0,
+                                        z: 0,
+                                      ),
+                                    );
+                                  },
+                                  child: const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 4),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.add_location_alt_outlined, color: Colors.white, size: 20),
+                                        SizedBox(height: 3),
+                                        Text('Add Node', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+                                      ],
                                     ),
-                                  );
-                                },
-                              ),
-                              Container(height: 24, width: 1, color: Colors.white24),
-                              TextButton.icon(
-                                style: TextButton.styleFrom(
-                                  foregroundColor: _isLinkingMode ? colorScheme.primary : Colors.white,
+                                  ),
                                 ),
-                                icon: const Icon(Icons.polyline_outlined),
-                                label: const Text('Link Edge'),
-                                onPressed: _nodes.length < 2
-                                    ? null
-                                    : () {
-                                        setState(() => _isLinkingMode = !_isLinkingMode);
-                                        _showInspector();
-                                      },
                               ),
                               Container(height: 24, width: 1, color: Colors.white24),
-                              TextButton.icon(
-                                style: TextButton.styleFrom(foregroundColor: Colors.white),
-                                icon: const Icon(Icons.list_alt),
-                                label: Text('${_nodes.length} Nodes'),
-                                onPressed: _showInspector,
+                              Expanded(
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(12),
+                                  onTap: _nodes.length < 2
+                                      ? null
+                                      : () {
+                                          setState(() => _isLinkingMode = !_isLinkingMode);
+                                          _showInspector();
+                                        },
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 4),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.polyline_outlined,
+                                          color: _nodes.length < 2
+                                              ? Colors.white38
+                                              : (_isLinkingMode ? colorScheme.primary : Colors.white),
+                                          size: 20,
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          'Link Edge',
+                                          style: TextStyle(
+                                            color: _nodes.length < 2
+                                                ? Colors.white38
+                                                : (_isLinkingMode ? colorScheme.primary : Colors.white),
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Container(height: 24, width: 1, color: Colors.white24),
+                              Expanded(
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(12),
+                                  onTap: _showInspector,
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 4),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.list_alt, color: Colors.white, size: 20),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          '${_nodes.length} Nodes',
+                                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
                               ),
                             ],
                           ),

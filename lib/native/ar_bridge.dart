@@ -63,6 +63,21 @@ class TrackingStateChangedEvent extends ArEvent {
   TrackingStateChangedEvent(this.state);
 }
 
+class UserPoseEvent extends ArEvent {
+  final double x;
+  final double y;
+  final double z;
+
+  UserPoseEvent({required this.x, required this.y, required this.z});
+}
+
+class ObstacleDetectedEvent extends ArEvent {
+  final double distance;
+  final String description;
+
+  ObstacleDetectedEvent({required this.distance, required this.description});
+}
+
 /// Dart-side wrapper for the `mapx/ar_bridge` Method Channel and
 /// `mapx/ar_events` Event Channel (native side: android/.../ArBridge.kt).
 class ArBridge {
@@ -122,6 +137,18 @@ class ArBridge {
     });
   }
 
+  Future<void> renderSmoothedPath(List<Map<String, dynamic>> points) {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) return Future.value();
+    return _methodChannel.invokeMethod('renderPath', {
+      'points': points,
+    });
+  }
+
+  Future<void> clearPath() {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) return Future.value();
+    return _methodChannel.invokeMethod('clearPath').catchError((Object _) {});
+  }
+
   Future<void> stopArSession() {
     if (Platform.environment.containsKey('FLUTTER_TEST')) return Future.value();
     return _methodChannel.invokeMethod('stopArSession').catchError((Object _) {});
@@ -166,6 +193,17 @@ class ArBridge {
         return ApproachingNodeEvent(
           nodeId: map['nodeId'] as String,
           distance: (map['distance'] as num).toDouble(),
+        );
+      case 'userPose':
+        return UserPoseEvent(
+          x: (map['x'] as num).toDouble(),
+          y: (map['y'] as num).toDouble(),
+          z: (map['z'] as num).toDouble(),
+        );
+      case 'obstacleDetected':
+        return ObstacleDetectedEvent(
+          distance: (map['distance'] as num? ?? 1.0).toDouble(),
+          description: map['description'] as String? ?? 'Obstacle ahead',
         );
       case 'trackingStateChanged':
         return TrackingStateChangedEvent(
