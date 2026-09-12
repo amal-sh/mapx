@@ -41,9 +41,11 @@ android {
 }
 
 dependencies {
-    // ARCore session, camera frame access, hit-testing. SceneView (rendering)
-    // and MLKit (OCR) are added when Phases 2/4 actually use them.
+    // ARCore session, camera frame access, hit-testing.
     implementation("com.google.ar:core:1.56.0")
+
+    // Google ML Kit Text Recognition for room doorplate OCR and localization
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 }
 
 flutter {

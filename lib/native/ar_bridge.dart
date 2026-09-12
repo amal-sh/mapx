@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -159,17 +160,49 @@ class ArBridge {
     return _methodChannel.invokeMethod('stopMappingSession').catchError((Object _) {});
   }
 
+  Future<bool> startOcrStream() async {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) return true;
+    try {
+      final result = await _methodChannel.invokeMethod<bool>('startOcrStream');
+      return result ?? true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> stopOcrStream() async {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) return true;
+    try {
+      final result = await _methodChannel.invokeMethod<bool>('stopOcrStream');
+      return result ?? true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  final StreamController<ArEvent> _simulatedEvents = StreamController<ArEvent>.broadcast();
+
+  /// Inject an event for testing or in-app preview/simulation.
+  void injectEvent(ArEvent event) {
+    _simulatedEvents.add(event);
+  }
+
   /// Broadcast stream of native AR events. Safe to listen to even when no
   /// native implementation is registered (e.g. running on web/desktop during
   /// UI development) — errors are swallowed rather than thrown.
   Stream<ArEvent> get events {
     if (Platform.environment.containsKey('FLUTTER_TEST')) {
-      return const Stream.empty();
+      return _simulatedEvents.stream;
     }
     return _events ??= _eventChannel
         .receiveBroadcastStream()
         .map(_parseEvent)
-        .handleError((Object _) {});
+        .handleError((Object _) {})
+        .transform(
+          StreamTransformer<ArEvent, ArEvent>.fromHandlers(
+            handleData: (data, sink) => sink.add(data),
+          ),
+        );
   }
 
   ArEvent _parseEvent(dynamic raw) {
@@ -178,12 +211,14 @@ class ArBridge {
       case 'planeDetected':
         return PlaneDetectedEvent((map['planeCount'] as num? ?? 1).toInt());
       case 'ocrMatch':
-        final screenPos = Map<String, dynamic>.from(map['screenPos'] as Map);
+        final screenPos = map['screenPos'] != null
+            ? Map<String, dynamic>.from(map['screenPos'] as Map)
+            : {'x': 0.5, 'y': 0.5};
         return OcrMatchEvent(
           label: map['label'] as String,
-          screenX: (screenPos['x'] as num).toDouble(),
-          screenY: (screenPos['y'] as num).toDouble(),
-          confidence: (map['confidence'] as num).toDouble(),
+          screenX: (screenPos['x'] as num? ?? 0.5).toDouble(),
+          screenY: (screenPos['y'] as num? ?? 0.5).toDouble(),
+          confidence: (map['confidence'] as num? ?? 1.0).toDouble(),
         );
       case 'hitTestResult':
         return HitTestResultEvent(

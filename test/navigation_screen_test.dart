@@ -7,6 +7,7 @@ import 'package:mapx/models/building.dart';
 import 'package:mapx/models/edge.dart';
 import 'package:mapx/models/floor.dart';
 import 'package:mapx/models/node.dart';
+import 'package:mapx/native/ar_bridge.dart';
 import 'package:mapx/screens/navigation_screen.dart';
 
 void main() {
@@ -250,6 +251,122 @@ void main() {
       expect(find.text('Select Current Location'), findsNothing);
       expect(find.textContaining('From: Corridor Junction'), findsWidgets);
       expect(find.textContaining('Total: 6.0m to Room 101'), findsOneWidget);
+    });
+
+    testWidgets('opens OCR scanner overlay from top bar and sets start location on match', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NavigationScreen(
+            repository: repo,
+            floor: floor,
+            destination: room101,
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      // Open OCR door scanner from top bar button
+      final scanBtn = find.byTooltip('Scan Doorplate (OCR)');
+      expect(scanBtn, findsOneWidget);
+      await tester.tap(scanBtn);
+      await tester.pumpAndSettle();
+
+      // Verify OCR Scanner HUD is displayed
+      expect(find.text('MLKit OCR Doorplate Scanner'), findsOneWidget);
+      expect(find.text('Point camera at room number or entrance sign'), findsOneWidget);
+
+      // Simulate OCR match event for 'Corridor Junction'
+      ArBridge.instance.injectEvent(
+        OcrMatchEvent(
+          label: 'Corridor Junction',
+          screenX: 0.5,
+          screenY: 0.5,
+          confidence: 0.95,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Scanner overlay exits automatically and route is recomputed from Corridor Junction
+      expect(find.text('MLKit OCR Doorplate Scanner'), findsNothing);
+      expect(find.textContaining('From: Corridor Junction'), findsWidgets);
+      expect(find.textContaining('Total: 6.0m to Room 101'), findsOneWidget);
+    });
+
+    testWidgets('doorway drift correction recalibrates user position when passing doorplate', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NavigationScreen(
+            repository: repo,
+            floor: floor,
+            destination: room101,
+            startNode: entrance,
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      // In active navigation, inject an OCR match for the junction along the corridor
+      ArBridge.instance.injectEvent(
+        OcrMatchEvent(
+          label: 'Corridor Junction',
+          screenX: 0.5,
+          screenY: 0.5,
+          confidence: 0.95,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Verify drift correction notification pill appears
+      expect(find.textContaining('Odometry calibrated at Corridor Junction'), findsOneWidget);
+    });
+
+    testWidgets('displays celebratory arrival message and modal when reaching destination', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NavigationScreen(
+            repository: repo,
+            floor: floor,
+            destination: room101,
+            startNode: junction,
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      // Initially at junction, total 6.0m
+      expect(find.textContaining('Total: 6.0m to Room 101'), findsOneWidget);
+      expect(find.text('You Have Reached Your Destination!'), findsNothing);
+
+      // Advance instruction step to reach arrival step
+      final nextStepBtn = find.byTooltip('Next Step');
+      expect(nextStepBtn, findsOneWidget);
+      await tester.tap(nextStepBtn);
+      await tester.pumpAndSettle();
+
+      // On final step, button transitions to 'Arrive at Destination'
+      final arriveBtn = find.byTooltip('Arrive at Destination');
+      expect(arriveBtn, findsOneWidget);
+      await tester.tap(arriveBtn);
+      await tester.pumpAndSettle();
+
+      // 1. Verify celebratory arrival dialog is presented
+      expect(find.text('You Have Reached Your Destination!'), findsOneWidget);
+      expect(find.textContaining('You have arrived at Room 101 on Ground Floor.'), findsOneWidget);
+      expect(find.text('Done'), findsOneWidget);
+      expect(find.text('View Map'), findsOneWidget);
+
+      // 2. Verify HUD displays celebratory arrival banner
+      expect(find.text('Destination Reached!'), findsOneWidget);
+      expect(find.text('You have arrived at Room 101'), findsOneWidget);
+
+      // 3. Tap 'Done' to dismiss dialog
+      await tester.tap(find.text('Done'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('You Have Reached Your Destination!'), findsNothing);
     });
   });
 }

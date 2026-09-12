@@ -1,6 +1,10 @@
 package com.example.mapx
 
 import android.util.Log
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.TextRecognizer
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
@@ -13,7 +17,8 @@ private const val EVENT_CHANNEL = "mapx/ar_events"
  * Wires up the `mapx/ar_bridge` Method Channel and `mapx/ar_events` Event
  * Channel per the contract in the implementation plan.
  *
- * Coordinates between Flutter, ARCore Session, and SceneView path rendering.
+ * Coordinates between Flutter, ARCore Session, SceneView path rendering,
+ * and MLKit text recognition for indoor localization and drift correction.
  */
 class ArBridge(private val flutterEngine: FlutterEngine) {
 
@@ -24,6 +29,55 @@ class ArBridge(private val flutterEngine: FlutterEngine) {
 
     private var eventSink: EventChannel.EventSink? = null
     private var activePathPoints: List<Map<String, Any>> = emptyList()
+    private var isOcrStreamActive: Boolean = false
+    private var textRecognizer: TextRecognizer? = null
+
+    private fun initTextRecognizer() {
+        if (textRecognizer == null) {
+            try {
+                textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                Log.d(TAG, "MLKit TextRecognizer initialized.")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to initialize MLKit TextRecognizer: ${e.message}")
+            }
+        }
+    }
+
+    fun dispatchOcrMatch(
+        label: String,
+        confidence: Double = 0.95,
+        screenX: Double = 0.5,
+        screenY: Double = 0.5
+    ) {
+        eventSink?.success(
+            mapOf(
+                "type" to "ocrMatch",
+                "label" to label,
+                "confidence" to confidence,
+                "screenPos" to mapOf("x" to screenX, "y" to screenY)
+            )
+        )
+    }
+
+    fun processImageForOcr(image: InputImage) {
+        if (!isOcrStreamActive) return
+        initTextRecognizer()
+        textRecognizer?.process(image)
+            ?.addOnSuccessListener { visionText ->
+                for (block in visionText.textBlocks) {
+                    val text = block.text.trim()
+                    if (text.isNotBlank()) {
+                        val box = block.boundingBox
+                        val screenX = box?.centerX()?.toDouble() ?: 0.5
+                        val screenY = box?.centerY()?.toDouble() ?: 0.5
+                        dispatchOcrMatch(text, 0.95, screenX, screenY)
+                    }
+                }
+            }
+            ?.addOnFailureListener { e ->
+                Log.w(TAG, "OCR processing failed: ${e.message}")
+            }
+    }
 
     fun sendEvent(event: Map<String, Any?>) {
         eventSink?.success(event)
@@ -97,8 +151,22 @@ class ArBridge(private val flutterEngine: FlutterEngine) {
                         result.success(null)
                     }
 
+                    "startOcrStream" -> {
+                        Log.d(TAG, "startOcrStream()")
+                        isOcrStreamActive = true
+                        initTextRecognizer()
+                        result.success(true)
+                    }
+
+                    "stopOcrStream" -> {
+                        Log.d(TAG, "stopOcrStream()")
+                        isOcrStreamActive = false
+                        result.success(true)
+                    }
+
                     "stopArSession" -> {
                         Log.d(TAG, "stopArSession()")
+                        isOcrStreamActive = false
                         activePathPoints = emptyList()
                         activePlatformView?.onClearPath()
                         result.success(null)

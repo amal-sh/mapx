@@ -10,6 +10,7 @@ class StartLocationPickerSheet extends StatefulWidget {
   final MapNode? selectedNode;
   final String floorName;
   final ValueChanged<MapNode> onNodeSelected;
+  final VoidCallback? onScanRequested;
 
   const StartLocationPickerSheet({
     super.key,
@@ -18,6 +19,7 @@ class StartLocationPickerSheet extends StatefulWidget {
     required this.selectedNode,
     required this.floorName,
     required this.onNodeSelected,
+    this.onScanRequested,
   });
 
   static void show({
@@ -27,6 +29,7 @@ class StartLocationPickerSheet extends StatefulWidget {
     required MapNode? selectedNode,
     required String floorName,
     required ValueChanged<MapNode> onNodeSelected,
+    VoidCallback? onScanRequested,
   }) {
     showModalBottomSheet<void>(
       context: context,
@@ -37,6 +40,12 @@ class StartLocationPickerSheet extends StatefulWidget {
         destination: destination,
         selectedNode: selectedNode,
         floorName: floorName,
+        onScanRequested: onScanRequested != null
+            ? () {
+                Navigator.of(ctx).pop();
+                onScanRequested();
+              }
+            : null,
         onNodeSelected: (node) {
           Navigator.of(ctx).pop();
           onNodeSelected(node);
@@ -195,6 +204,61 @@ class _StartLocationPickerSheetState extends State<StartLocationPickerSheet> {
               ],
             ),
           ),
+
+          // OCR Doorplate Auto-Detect Button
+          if (widget.onScanRequested != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+              child: InkWell(
+                onTap: widget.onScanRequested,
+                borderRadius: BorderRadius.circular(14),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF0284C7), Color(0xFF0F766E)],
+                    ),
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF0284C7).withValues(alpha: 0.25),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(CupertinoIcons.viewfinder, color: Colors.white, size: 20),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Auto-Detect via Doorplate (OCR)',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              'Point camera at room number to set start location',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(CupertinoIcons.chevron_right, color: Colors.white70, size: 16),
+                    ],
+                  ),
+                ),
+              ),
+            ),
 
           // Search Field
           Padding(

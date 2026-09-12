@@ -20,6 +20,7 @@ class ArPerspectiveSimulationView extends StatelessWidget {
   final double animationProgress;
   final Vector3? userPosition;
   final bool isOverlay;
+  final bool hasReachedDestination;
 
   const ArPerspectiveSimulationView({
     super.key,
@@ -31,6 +32,7 @@ class ArPerspectiveSimulationView extends StatelessWidget {
     required this.animationProgress,
     this.userPosition,
     this.isOverlay = false,
+    this.hasReachedDestination = false,
   });
 
   @override
@@ -47,6 +49,7 @@ class ArPerspectiveSimulationView extends StatelessWidget {
           startNode: startNode,
           userPosition: userPosition,
           isOverlay: isOverlay,
+          hasReachedDestination: hasReachedDestination,
         ),
         child: isOverlay
             ? const SizedBox.expand()
@@ -98,6 +101,7 @@ class ArPerspectivePainter extends CustomPainter {
   final MapNode? startNode;
   final Vector3? userPosition;
   final bool isOverlay;
+  final bool hasReachedDestination;
 
   ArPerspectivePainter({
     required this.points,
@@ -108,6 +112,7 @@ class ArPerspectivePainter extends CustomPainter {
     this.startNode,
     this.userPosition,
     this.isOverlay = false,
+    this.hasReachedDestination = false,
   });
 
   @override
@@ -207,7 +212,7 @@ class ArPerspectivePainter extends CustomPainter {
       final lateralScale = width * 0.22;
       final sx = originX + (xCam * lateralScale) * s;
 
-      return Offset(sx.clamp(-120.0, width + 120.0), sy);
+      return Offset(sx.clamp(-width * 1.5, width * 2.5), sy);
     }
 
     final visiblePoints = points.isNotEmpty ? points.sublist(startIdx) : <SmoothedPathPoint>[];
@@ -217,69 +222,150 @@ class ArPerspectivePainter extends CustomPainter {
       if (proj != null) screenOffsets.add(proj);
     }
 
-    // 3. Draw smoothed path glow line
+    // 3. Draw smoothed path glow line with depth-tapered width
     if (screenOffsets.length >= 2) {
       final glowPaint = Paint()
         ..color = const Color(0xFF00E5FF).withValues(alpha: 0.28)
-        ..strokeWidth = 14.0
         ..strokeCap = StrokeCap.round
         ..style = PaintingStyle.stroke;
 
       final linePaint = Paint()
         ..color = const Color(0xFF00E5FF)
-        ..strokeWidth = 3.5
         ..strokeCap = StrokeCap.round
         ..style = PaintingStyle.stroke;
 
-      final path = Path();
-      path.moveTo(screenOffsets.first.dx, screenOffsets.first.dy);
-      for (int i = 1; i < screenOffsets.length; i++) {
-        path.lineTo(screenOffsets[i].dx, screenOffsets[i].dy);
-      }
+      for (int i = 0; i < screenOffsets.length - 1; i++) {
+        final pA = screenOffsets[i];
+        final pB = screenOffsets[i + 1];
+        final avgY = (pA.dy + pB.dy) * 0.5;
+        final depthRatio = ((avgY - horizonY) / (originY - horizonY)).clamp(0.12, 1.0);
 
-      canvas.drawPath(path, glowPaint);
-      canvas.drawPath(path, linePaint);
+        glowPaint.strokeWidth = (12.0 * depthRatio).clamp(3.0, 14.0);
+        linePaint.strokeWidth = (3.5 * depthRatio).clamp(1.2, 3.5);
+
+        canvas.drawLine(pA, pB, glowPaint);
+        canvas.drawLine(pA, pB, linePaint);
+      }
 
       // Draw subtle AR feature/tracking sparkle points like in real ARCore
       _drawTrackingFeatureDots(canvas, screenOffsets, horizonY, originY);
     }
 
-    // 4. Draw large corridor-spanning directional chevrons matching real AR navigation
-    if (screenOffsets.length >= 2) {
-      final numChevrons = math.min(7, math.max(4, (screenOffsets.length / 3).round()));
-      for (int c = 0; c < numChevrons; c++) {
-        final ratio = ((c + 0.15) / numChevrons).clamp(0.0, 0.95);
-        final idx = (ratio * (screenOffsets.length - 1)).round().clamp(0, screenOffsets.length - 2);
+    // 4. Draw dynamic corridor-spanning directional chevrons flat on the ground in 3D perspective
+    if (visiblePoints.length >= 2) {
+      final startDist = visiblePoints.first.distanceAlongPath;
+      final endDist = visiblePoints.last.distanceAlongPath;
+      final visibleMeters = endDist - startDist;
 
-        final current = screenOffsets[idx];
-        final next = screenOffsets[idx + 1];
+      final chevronDistances = <double>[];
+      if (hasReachedDestination) {
+        // Destination arrived - silence arrows
+      } else if (visibleMeters > 0.4 && visibleMeters < 1.4) {
+        chevronDistances.add(startDist + visibleMeters * 0.5);
+      } else if (visibleMeters >= 1.4) {
+        // Physically spaced: 1 chevron every ~1.5m
+        const chevronInterval = 1.5;
+        // Start 0.65m in front of camera anchor so chevron is comfortably in view on the ground
+        for (double d = startDist + 0.65; d <= endDist - 0.35; d += chevronInterval) {
+          chevronDistances.add(d);
+        }
+      } else if (screenOffsets.length >= 2) {
+        // Fallback if distance metrics are near zero
+        final count = (visiblePoints.length / 3).clamp(1, 8).toInt();
+        for (int i = 0; i < count; i++) {
+          final ratio = (i + 0.5) / count;
+          chevronDistances.add(startDist + ratio * math.max(0.5, visibleMeters));
+        }
+      }
 
-        final dx = next.dx - current.dx;
-        final dy = next.dy - current.dy;
-        final angle = math.atan2(dy, dx);
+      for (final dist in chevronDistances) {
+        final distRatio = visibleMeters > 0.01
+            ? ((dist - startDist) / visibleMeters).clamp(0.0, 1.0)
+            : 0.5;
 
-        final depthRatio = ((current.dy - horizonY) / (originY - horizonY)).clamp(0.18, 1.0);
-        final scale = 0.38 + 0.62 * depthRatio;
+        // Sample exact 3D position and smoothed tangent vector on ground plane
+        final sample = _samplePathPositionAndTangent(visiblePoints, dist);
+        final p = sample.position;
+        final t = sample.tangent;
 
-        final pulsePhase = (ratio - animationProgress) % 1.0;
-        final brightness = (0.75 + 0.25 * math.sin((pulsePhase + 1.0) % 1.0 * math.pi)).clamp(0.55, 1.0);
+        // Perpendicular right vector on ground plane: R = (T_z, 0, -T_x)
+        final rxFloor = t.z;
+        final rzFloor = -t.x;
 
-        _drawChevron(canvas, current, angle, scale, brightness, width);
+        // Camera perspective factor s at p
+        final dx = p.x - anchorPos.x;
+        final dz = p.z - anchorPos.z;
+        final zCam = dx * fx + dz * fz;
+        if (zCam < -0.2) continue; // Behind camera
+
+        final s = 4.5 / (4.5 + math.max(0.0, zCam));
+
+        // Realistic tapering: scale down slightly in 3D + optical perspective shrinking
+        final taper = (0.52 + 0.48 * s).clamp(0.50, 1.0);
+        final hw = 0.34 * taper;     // Half-width (0.17m far to 0.34m near)
+        final lTip = 0.40 * taper;   // Length to apex (0.20m far to 0.40m near)
+        final lBand = 0.17 * taper;  // Band thickness (0.085m far to 0.17m near)
+
+        // 6 ground vertices in 3D world space (Y = p.y)
+        final vTip = Vector3(p.x + t.x * lTip, p.y, p.z + t.z * lTip);
+        final vRightFront = Vector3(p.x + rxFloor * hw, p.y, p.z + rzFloor * hw);
+        final vRightBack = Vector3(p.x + rxFloor * hw - t.x * lBand, p.y, p.z + rzFloor * hw - t.z * lBand);
+        final vNotch = Vector3(p.x + t.x * (lTip - lBand), p.y, p.z + t.z * (lTip - lBand));
+        final vLeftBack = Vector3(p.x - rxFloor * hw - t.x * lBand, p.y, p.z - rzFloor * hw - t.z * lBand);
+        final vLeftFront = Vector3(p.x - rxFloor * hw, p.y, p.z - rzFloor * hw);
+
+        final pTip = project(vTip);
+        final pRightFront = project(vRightFront);
+        final pRightBack = project(vRightBack);
+        final pNotch = project(vNotch);
+        final pLeftBack = project(vLeftBack);
+        final pLeftFront = project(vLeftFront);
+
+        if (pTip == null ||
+            pRightFront == null ||
+            pRightBack == null ||
+            pNotch == null ||
+            pLeftBack == null ||
+            pLeftFront == null) {
+          continue;
+        }
+
+        if (pTip.dy < horizonY - 15 || pTip.dy > height + 60) continue;
+
+        // Traveling light wave flowing towards the destination
+        final pulsePhase = (distRatio * 3.2 - animationProgress * 2.2) % 1.0;
+        final pulse = (0.72 + 0.28 * math.sin((pulsePhase + 1.0) % 1.0 * math.pi)).clamp(0.50, 1.0);
+        final distanceFade = (s / 0.85).clamp(0.40, 1.0);
+        final brightness = pulse * distanceFade;
+
+        _draw3dFloorChevron(
+          canvas: canvas,
+          pTip: pTip,
+          pRightFront: pRightFront,
+          pRightBack: pRightBack,
+          pNotch: pNotch,
+          pLeftBack: pLeftBack,
+          pLeftFront: pLeftFront,
+          scale: s,
+          brightness: brightness,
+        );
       }
 
       // Draw AR floor plane tracking ring in the foreground
-      final fgPos = screenOffsets.first;
-      final reticlePaint = Paint()
-        ..color = Colors.white.withValues(alpha: 0.32)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5;
-      final reticleGlow = Paint()
-        ..color = const Color(0xFF00E5FF).withValues(alpha: 0.18)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 4.0;
-      final reticleCenter = Offset(fgPos.dx - 85.0, math.min(height - 45.0, fgPos.dy + 35.0));
-      canvas.drawCircle(reticleCenter, 22.0, reticleGlow);
-      canvas.drawCircle(reticleCenter, 22.0, reticlePaint);
+      if (screenOffsets.isNotEmpty) {
+        final fgPos = screenOffsets.first;
+        final reticlePaint = Paint()
+          ..color = Colors.white.withValues(alpha: 0.32)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5;
+        final reticleGlow = Paint()
+          ..color = const Color(0xFF00E5FF).withValues(alpha: 0.18)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 4.0;
+        final reticleCenter = Offset(fgPos.dx - 85.0, math.min(height - 45.0, fgPos.dy + 35.0));
+        canvas.drawCircle(reticleCenter, 22.0, reticleGlow);
+        canvas.drawCircle(reticleCenter, 22.0, reticlePaint);
+      }
     }
 
     // 5. Draw turn indicator arrows at each upcoming turn (Left, Right)
@@ -349,6 +435,7 @@ class ArPerspectivePainter extends CustomPainter {
         pos: destPos,
         label: destination.label,
         scale: depthRatio,
+        hasReached: hasReachedDestination,
       );
     }
   }
@@ -506,117 +593,187 @@ class ArPerspectivePainter extends CustomPainter {
     );
   }
 
-  /// Draws a high-fidelity 3D Destination Marker in AR:
-  /// - Ruby red pulsating concentric bullseye rings on floor
-  /// - Holographic vertical laser light column
-  /// - Floating 3D Map Pin shape with inner white 5-pointed star icon
-  /// - Floating luminous "★ DESTINATION • [Label]" badge
+  /// Draws a high-fidelity Big 3D Rotating Destination Marker in AR:
+  /// - 360-degree rotating ground radar scan with perspective-projected floor rings
+  /// - Towering volumetric vertical laser light column with rising energy sparks
+  /// - Large 3D faceted crystal map pin rotating continuously around the vertical Y-axis
+  /// - Dynamic lighting calculation on each rotating face (specular highlights vs. ambient shadow)
+  /// - Dual 3D gyroscopic orbital rings with orbiting satellite beads
+  /// - Floating 3D rotating star core inside the pin head
+  /// - Floating luminous "★ DESTINATION • [Label]" or "★ ARRIVED" badge
   void _drawDestinationMarker({
     required Canvas canvas,
     required Offset pos,
     required String label,
     required double scale,
+    bool hasReached = false,
   }) {
-    const destColor = Color(0xFFEF4444); // Crimson ruby red
+    final destColor = hasReached ? const Color(0xFF10B981) : const Color(0xFFEF4444);
+    final accentColor = hasReached ? const Color(0xFF34D399) : const Color(0xFFF87171);
+    final pinScale = scale * 1.65; // Big prominent 3D presence
 
-    // 1. Concentric pulsing bullseye rings on floor
+    // Continuous 3D rotation angle
+    final rotY = animationProgress * 2 * math.pi;
+
+    // 1. Perspective-flattened floor radar & expanding ripple rings
+    canvas.save();
+    canvas.translate(pos.dx, pos.dy);
+    canvas.scale(1.0, 0.42); // 3D floor perspective tilt
+
+    final pulseRadius = (32.0 + 20.0 * (1.0 - animationProgress)) * pinScale;
     final pulseRing = Paint()
-      ..color = destColor.withValues(alpha: (0.55 * (1.0 - animationProgress)).clamp(0.0, 0.55))
-      ..strokeWidth = 3.0 * scale
+      ..color = destColor.withValues(alpha: (0.6 * (1.0 - animationProgress)).clamp(0.0, 0.6))
+      ..strokeWidth = 3.0 * pinScale
       ..style = PaintingStyle.stroke;
 
-    final midRing = Paint()
-      ..color = destColor.withValues(alpha: 0.8)
-      ..strokeWidth = 2.0 * scale
+    final baseRing = Paint()
+      ..color = destColor.withValues(alpha: 0.85)
+      ..strokeWidth = 2.5 * pinScale
       ..style = PaintingStyle.stroke;
 
-    final innerFill = Paint()
+    final innerRing = Paint()
       ..color = destColor.withValues(alpha: 0.35)
       ..style = PaintingStyle.fill;
 
-    final pulseRadius = (20.0 + 14.0 * (1.0 - animationProgress)) * scale;
-    canvas.drawCircle(pos, pulseRadius, pulseRing);
-    canvas.drawCircle(pos, 16.0 * scale, midRing);
-    canvas.drawCircle(pos, 9.0 * scale, innerFill);
-    canvas.drawCircle(pos, 3.5 * scale, Paint()..color = Colors.white..style = PaintingStyle.fill);
+    canvas.drawCircle(Offset.zero, pulseRadius, pulseRing);
+    canvas.drawCircle(Offset.zero, 28.0 * pinScale, baseRing);
+    canvas.drawCircle(Offset.zero, 16.0 * pinScale, innerRing);
 
-    // 2. Holographic vertical laser light beam from floor to floating pin
-    final badgeY = pos.dy - (68.0 * scale);
-    final beamGlow = Paint()
-      ..color = destColor.withValues(alpha: 0.35)
-      ..strokeWidth = 7.0 * scale;
-    final beamCore = Paint()
-      ..color = Colors.white.withValues(alpha: 0.85)
-      ..strokeWidth = 2.0 * scale;
-    canvas.drawLine(Offset(pos.dx, pos.dy), Offset(pos.dx, badgeY + 22 * scale), beamGlow);
-    canvas.drawLine(Offset(pos.dx, pos.dy), Offset(pos.dx, badgeY + 22 * scale), beamCore);
-
-    // 3. Floating 3D Destination Map Pin Silhouette
-    final pinHeadCenter = Offset(pos.dx, badgeY);
-    final pinRadius = 18.0 * scale;
-    final pinTip = Offset(pos.dx, badgeY + 22.0 * scale);
-
-    // Map Pin Path
-    final pinPath = Path();
-    pinPath.moveTo(pinTip.dx, pinTip.dy);
-    pinPath.quadraticBezierTo(
-      pinHeadCenter.dx - pinRadius * 1.1,
-      pinHeadCenter.dy + pinRadius * 0.4,
-      pinHeadCenter.dx - pinRadius,
-      pinHeadCenter.dy,
-    );
-    pinPath.arcTo(
-      Rect.fromCircle(center: pinHeadCenter, radius: pinRadius),
-      math.pi,
-      math.pi,
-      false,
-    );
-    pinPath.quadraticBezierTo(
-      pinHeadCenter.dx + pinRadius * 1.1,
-      pinHeadCenter.dy + pinRadius * 0.4,
-      pinTip.dx,
-      pinTip.dy,
-    );
-    pinPath.close();
-
-    // Outer glow
-    final pinGlow = Paint()
-      ..color = destColor.withValues(alpha: 0.5)
-      ..style = PaintingStyle.fill
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
-    canvas.drawPath(pinPath, pinGlow);
-
-    // Pin body gradient
-    final pinFill = Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
+    // Rotating 3D floor radar sweep beam
+    final sweepPaint = Paint()
+      ..shader = SweepGradient(
+        startAngle: 0.0,
+        endAngle: math.pi * 2,
         colors: [
-          const Color(0xFFF87171),
-          const Color(0xFFDC2626),
-          const Color(0xFF991B1B),
+          destColor.withValues(alpha: 0.0),
+          destColor.withValues(alpha: 0.05),
+          destColor.withValues(alpha: 0.45),
         ],
-      ).createShader(Rect.fromCircle(center: pinHeadCenter, radius: pinRadius * 1.4))
+        transform: GradientRotation(rotY),
+      ).createShader(Rect.fromCircle(center: Offset.zero, radius: 28.0 * pinScale))
       ..style = PaintingStyle.fill;
-    canvas.drawPath(pinPath, pinFill);
+    canvas.drawCircle(Offset.zero, 28.0 * pinScale, sweepPaint);
 
-    final pinBorder = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 2.0 * scale
-      ..style = PaintingStyle.stroke;
-    canvas.drawPath(pinPath, pinBorder);
+    // Cardinal floor crosshair ticks
+    final tickPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.85)
+      ..strokeWidth = 1.8 * pinScale;
+    canvas.drawLine(Offset(-36 * pinScale, 0), Offset(-24 * pinScale, 0), tickPaint);
+    canvas.drawLine(Offset(24 * pinScale, 0), Offset(36 * pinScale, 0), tickPaint);
+    canvas.drawLine(Offset(0, -36 * pinScale), Offset(0, -24 * pinScale), tickPaint);
+    canvas.drawLine(Offset(0, 24 * pinScale), Offset(0, 36 * pinScale), tickPaint);
 
-    // Crisp Vector Star / Flag Icon inside Pin Head
-    _drawStar(canvas, pinHeadCenter, 5, 8.0 * scale, 4.0 * scale, Colors.white);
+    canvas.restore();
 
-    // 4. Floating Destination Label Pill
-    final labelY = badgeY - (28.0 * scale);
+    // 2. Towering Volumetric Vertical Holographic Laser Pillar
+    final badgeY = pos.dy - (88.0 * pinScale);
+
+    final beamHaze = Paint()
+      ..color = destColor.withValues(alpha: 0.22)
+      ..strokeWidth = 18.0 * pinScale;
+    final beamGlow = Paint()
+      ..color = accentColor.withValues(alpha: 0.45)
+      ..strokeWidth = 7.0 * pinScale;
+    final beamCore = Paint()
+      ..color = Colors.white.withValues(alpha: 0.90)
+      ..strokeWidth = 2.0 * pinScale;
+
+    canvas.drawLine(Offset(pos.dx, pos.dy), Offset(pos.dx, badgeY + 34 * pinScale), beamHaze);
+    canvas.drawLine(Offset(pos.dx, pos.dy), Offset(pos.dx, badgeY + 34 * pinScale), beamGlow);
+    canvas.drawLine(Offset(pos.dx, pos.dy), Offset(pos.dx, badgeY + 34 * pinScale), beamCore);
+
+    // Rising energy sparkles along the light beam
+    final rand = math.Random(42);
+    final sparkPaint = Paint()..style = PaintingStyle.fill;
+    for (int s = 0; s < 5; s++) {
+      final sparkT = ((animationProgress + s / 5.0) % 1.0);
+      final sy = pos.dy - sparkT * (pos.dy - (badgeY + 38 * pinScale));
+      final sx = pos.dx + (rand.nextDouble() - 0.5) * 12.0 * pinScale;
+      sparkPaint.color = Colors.white.withValues(alpha: (0.8 * (1.0 - sparkT)).clamp(0.0, 0.8));
+      canvas.drawCircle(Offset(sx, sy), 2.0 * pinScale, sparkPaint);
+    }
+
+    final emblemCenter = Offset(pos.dx, badgeY);
+
+    // 3. Back Half of Dual 3D Gyroscopic Orbital Rings (drawn behind the pin)
+    _drawOrbitalRings(
+      canvas: canvas,
+      center: emblemCenter,
+      radius: 36.0 * pinScale,
+      tiltAngle: 0.45,
+      rotY: rotY,
+      color: accentColor,
+      isBackHalf: true,
+      scale: pinScale,
+    );
+    _drawOrbitalRings(
+      canvas: canvas,
+      center: emblemCenter,
+      radius: 32.0 * pinScale,
+      tiltAngle: -0.45,
+      rotY: -rotY * 1.25,
+      color: destColor,
+      isBackHalf: true,
+      scale: pinScale,
+    );
+
+    // 4. Large 3D Faceted Crystal Map Pin Body (Rotating in 3D around Y-axis)
+    _draw3dRotatingPinBody(
+      canvas: canvas,
+      center: emblemCenter,
+      tipY: 38.0 * pinScale,
+      topY: -32.0 * pinScale,
+      equatorRadius: 26.0 * pinScale,
+      crownRadius: 18.0 * pinScale,
+      crownY: -16.0 * pinScale,
+      rotY: rotY,
+      baseColor: destColor,
+      highlightColor: accentColor,
+      hasReached: hasReached,
+      scale: pinScale,
+    );
+
+    // 5. Front Half of Dual 3D Gyroscopic Orbital Rings (drawn in front of the pin)
+    _drawOrbitalRings(
+      canvas: canvas,
+      center: emblemCenter,
+      radius: 36.0 * pinScale,
+      tiltAngle: 0.45,
+      rotY: rotY,
+      color: accentColor,
+      isBackHalf: false,
+      scale: pinScale,
+    );
+    _drawOrbitalRings(
+      canvas: canvas,
+      center: emblemCenter,
+      radius: 32.0 * pinScale,
+      tiltAngle: -0.45,
+      rotY: -rotY * 1.25,
+      color: destColor,
+      isBackHalf: false,
+      scale: pinScale,
+    );
+
+    // 6. Floating 3D Star / Pin Core inside the pin head
+    final starScaleX = math.cos(rotY).abs().clamp(0.2, 1.0);
+    canvas.save();
+    canvas.translate(emblemCenter.dx, emblemCenter.dy);
+    canvas.scale(starScaleX, 1.0);
+    _drawStar(canvas, Offset.zero, 5, 9.0 * pinScale, 4.5 * pinScale, Colors.white);
+    canvas.restore();
+
+    // 7. Floating Holographic Destination Label Pill
+    final labelY = badgeY - (42.0 * pinScale);
+    final badgePrefix = hasReached ? '★ ARRIVED  ' : '★ DESTINATION  ';
+    final badgePrefixColor = hasReached ? const Color(0xFF34D399) : const Color(0xFFF87171);
+
     final textSpan = TextSpan(
       children: [
-        const TextSpan(
-          text: '★ DESTINATION  ',
+        TextSpan(
+          text: badgePrefix,
           style: TextStyle(
-            color: Color(0xFFF87171),
+            color: badgePrefixColor,
             fontWeight: FontWeight.w900,
             letterSpacing: 1.1,
           ),
@@ -630,7 +787,7 @@ class ArPerspectivePainter extends CustomPainter {
         ),
       ],
       style: TextStyle(
-        fontSize: (11.0 * scale).clamp(9.0, 13.0),
+        fontSize: (12.0 * pinScale).clamp(10.0, 15.0),
       ),
     );
 
@@ -639,8 +796,8 @@ class ArPerspectivePainter extends CustomPainter {
       textDirection: TextDirection.ltr,
     )..layout();
 
-    final pillWidth = textPainter.width + (20.0 * scale);
-    final pillHeight = textPainter.height + (10.0 * scale);
+    final pillWidth = textPainter.width + (24.0 * pinScale);
+    final pillHeight = textPainter.height + (12.0 * pinScale);
     final pillRect = RRect.fromRectAndRadius(
       Rect.fromCenter(
         center: Offset(pos.dx, labelY),
@@ -651,11 +808,11 @@ class ArPerspectivePainter extends CustomPainter {
     );
 
     final pillBg = Paint()
-      ..color = const Color(0xFF0F172A).withValues(alpha: 0.92)
+      ..color = const Color(0xFF0F172A).withValues(alpha: 0.94)
       ..style = PaintingStyle.fill;
     final pillBorder = Paint()
-      ..color = destColor.withValues(alpha: 0.8)
-      ..strokeWidth = 1.4 * scale
+      ..color = destColor.withValues(alpha: 0.9)
+      ..strokeWidth = 1.6 * pinScale
       ..style = PaintingStyle.stroke;
 
     canvas.drawRRect(pillRect, pillBg);
@@ -664,6 +821,242 @@ class ArPerspectivePainter extends CustomPainter {
       canvas,
       Offset(pos.dx - textPainter.width / 2, labelY - textPainter.height / 2),
     );
+  }
+
+  /// Draws a 3D faceted crystal pin with real Y-axis rotation and dynamic directional lighting
+  void _draw3dRotatingPinBody({
+    required Canvas canvas,
+    required Offset center,
+    required double tipY,
+    required double topY,
+    required double equatorRadius,
+    required double crownRadius,
+    required double crownY,
+    required double rotY,
+    required Color baseColor,
+    required Color highlightColor,
+    required bool hasReached,
+    required double scale,
+  }) {
+    const int numSegments = 8;
+    const double step = 2 * math.pi / numSegments;
+
+    // Directional light vector pointing from top-left-front: (0.45, -0.65, 0.6)
+    const lx = 0.45;
+    const ly = -0.65;
+    const lz = 0.60;
+
+    // Equator 3D vertices
+    final eqVertices = <math.Point<double>>[];
+    final eqZ = <double>[];
+    for (int i = 0; i < numSegments; i++) {
+      final a = i * step + rotY;
+      final x = equatorRadius * math.cos(a);
+      final z = equatorRadius * math.sin(a);
+      eqVertices.add(math.Point(x, 0.0));
+      eqZ.add(z);
+    }
+
+    // Crown 3D vertices (slightly higher, offset angle)
+    final crVertices = <math.Point<double>>[];
+    final crZ = <double>[];
+    for (int i = 0; i < numSegments; i++) {
+      final a = i * step + step * 0.5 + rotY;
+      final x = crownRadius * math.cos(a);
+      final z = crownRadius * math.sin(a);
+      crVertices.add(math.Point(x, crownY));
+      crZ.add(z);
+    }
+
+    final topApex = math.Point(0.0, topY);
+    final bottomTip = math.Point(0.0, tipY);
+
+    // Halo glow around center
+    final haloPaint = Paint()
+      ..color = baseColor.withValues(alpha: 0.35)
+      ..style = PaintingStyle.fill
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, 14 * scale);
+    canvas.drawCircle(center, equatorRadius * 1.3, haloPaint);
+
+    final edgePaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.75)
+      ..strokeWidth = 1.2 * scale
+      ..style = PaintingStyle.stroke;
+
+    final fillPaint = Paint()..style = PaintingStyle.fill;
+
+    // Helper to draw a single 3D triangle face with normal-based lighting
+    void drawTriangleFace(
+      math.Point<double> p1, double z1,
+      math.Point<double> p2, double z2,
+      math.Point<double> p3, double z3,
+    ) {
+      // 2D cross product for front-facing check in screen space
+      final cross = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
+      if (cross >= 0) return; // Back-facing face, cull
+
+      // Compute 3D normal: E1 = p2 - p1, E2 = p3 - p1
+      final e1x = p2.x - p1.x;
+      final e1y = p2.y - p1.y;
+      final e1z = z2 - z1;
+
+      final e2x = p3.x - p1.x;
+      final e2y = p3.y - p1.y;
+      final e2z = z3 - z1;
+
+      // Normal = E1 x E2
+      var nx = e1y * e2z - e1z * e2y;
+      var ny = e1z * e2x - e1x * e2z;
+      var nz = e1x * e2y - e1y * e2x;
+      final nLen = math.sqrt(nx * nx + ny * ny + nz * nz);
+      if (nLen > 0.001) {
+        nx /= nLen;
+        ny /= nLen;
+        nz /= nLen;
+      }
+
+      // Dot product with directional light
+      final dot = (nx * lx + ny * ly + nz * lz).clamp(-1.0, 1.0);
+      final intensity = (0.40 + 0.60 * math.max(0.0, dot)).clamp(0.25, 1.0);
+
+      // Specular highlight boost when normal points directly at light
+      final specular = math.pow(math.max(0.0, dot), 8).toDouble() * 0.45;
+
+      final faceColor = Color.lerp(
+        hasReached ? const Color(0xFF064E3B) : const Color(0xFF7F1D1D),
+        hasReached ? const Color(0xFF34D399) : const Color(0xFFFCA5A5),
+        intensity,
+      )!;
+
+      final r = (faceColor.r * 255 + specular * 255).clamp(0, 255).toInt();
+      final g = (faceColor.g * 255 + specular * 255).clamp(0, 255).toInt();
+      final b = (faceColor.b * 255 + specular * 255).clamp(0, 255).toInt();
+      fillPaint.color = Color.fromARGB(245, r, g, b);
+
+      final path = Path();
+      path.moveTo(center.dx + p1.x, center.dy + p1.y);
+      path.lineTo(center.dx + p2.x, center.dy + p2.y);
+      path.lineTo(center.dx + p3.x, center.dy + p3.y);
+      path.close();
+
+      canvas.drawPath(path, fillPaint);
+      canvas.drawPath(path, edgePaint);
+    }
+
+    // Render 3D faces:
+    // 1. Bottom cone triangles (from equator down to tip)
+    for (int i = 0; i < numSegments; i++) {
+      final next = (i + 1) % numSegments;
+      drawTriangleFace(
+        bottomTip, 0.0,
+        eqVertices[i], eqZ[i],
+        eqVertices[next], eqZ[next],
+      );
+    }
+
+    // 2. Middle belt quads (split into 2 triangles each)
+    for (int i = 0; i < numSegments; i++) {
+      final next = (i + 1) % numSegments;
+      drawTriangleFace(
+        eqVertices[i], eqZ[i],
+        crVertices[i], crZ[i],
+        eqVertices[next], eqZ[next],
+      );
+      drawTriangleFace(
+        eqVertices[next], eqZ[next],
+        crVertices[i], crZ[i],
+        crVertices[next], crZ[next],
+      );
+    }
+
+    // 3. Top crown facets (from crown to top apex)
+    for (int i = 0; i < numSegments; i++) {
+      final next = (i + 1) % numSegments;
+      drawTriangleFace(
+        topApex, 0.0,
+        crVertices[next], crZ[next],
+        crVertices[i], crZ[i],
+      );
+    }
+  }
+
+  /// Draws 3D gyroscopic orbital rings with perspective tilt, rotation, and orbiting satellite beads
+  void _drawOrbitalRings({
+    required Canvas canvas,
+    required Offset center,
+    required double radius,
+    required double tiltAngle,
+    required double rotY,
+    required Color color,
+    required bool isBackHalf,
+    required double scale,
+  }) {
+    const int numPoints = 40;
+    const double step = 2 * math.pi / numPoints;
+
+    final ringPaint = Paint()
+      ..color = color.withValues(alpha: isBackHalf ? 0.35 : 0.85)
+      ..strokeWidth = (isBackHalf ? 1.2 : 2.0) * scale
+      ..style = PaintingStyle.stroke;
+
+    final cosTilt = math.cos(tiltAngle);
+    final sinTilt = math.sin(tiltAngle);
+    final cosRot = math.cos(rotY);
+    final sinRot = math.sin(rotY);
+
+    final path = Path();
+    bool first = true;
+
+    for (int i = 0; i <= numPoints; i++) {
+      final angle = i * step;
+      // 3D circle in XY plane before tilt
+      final x0 = radius * math.cos(angle);
+      final y0 = radius * math.sin(angle) * sinTilt;
+      final z0 = radius * math.sin(angle) * cosTilt;
+
+      // Rotate around Y-axis
+      final x = x0 * cosRot + z0 * sinRot;
+      final z = -x0 * sinRot + z0 * cosRot;
+      final y = y0;
+
+      // Filter by back/front half
+      if ((isBackHalf && z < 0) || (!isBackHalf && z >= 0)) {
+        final pt = Offset(center.dx + x, center.dy + y);
+        if (first) {
+          path.moveTo(pt.dx, pt.dy);
+          first = false;
+        } else {
+          path.lineTo(pt.dx, pt.dy);
+        }
+      } else {
+        first = true;
+      }
+    }
+
+    canvas.drawPath(path, ringPaint);
+
+    // Orbiting satellite bead
+    final satAngle = rotY * 1.5;
+    final sx0 = radius * math.cos(satAngle);
+    final sy0 = radius * math.sin(satAngle) * sinTilt;
+    final sz0 = radius * math.sin(satAngle) * cosTilt;
+    final sx = sx0 * cosRot + sz0 * sinRot;
+    final sz = -sx0 * sinRot + sz0 * cosRot;
+    final sy = sy0;
+
+    if ((isBackHalf && sz < 0) || (!isBackHalf && sz >= 0)) {
+      final satCenter = Offset(center.dx + sx, center.dy + sy);
+      final beadPaint = Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.fill;
+      final beadGlow = Paint()
+        ..color = color.withValues(alpha: 0.6)
+        ..style = PaintingStyle.fill
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, 4 * scale);
+
+      canvas.drawCircle(satCenter, 3.5 * scale, beadGlow);
+      canvas.drawCircle(satCenter, 2.2 * scale, beadPaint);
+    }
   }
 
   void _drawStar(Canvas canvas, Offset center, int points, double outerR, double innerR, Color color) {
@@ -690,73 +1083,129 @@ class ArPerspectivePainter extends CustomPainter {
     canvas.drawPath(path, paint);
   }
 
-  void _drawChevron(
-    Canvas canvas,
-    Offset pos,
-    double angle,
-    double scale,
-    double brightness,
-    double screenWidth,
+  /// Samples a 3D position and tangent vector along [path] at given [targetDistance] (meters).
+  /// Uses a symmetric moving window to ensure smooth, continuous tangent transitions around curves.
+  ({Vector3 position, Vector3 tangent}) _samplePathPositionAndTangent(
+    List<SmoothedPathPoint> path,
+    double targetDistance,
   ) {
-    canvas.save();
-    canvas.translate(pos.dx, pos.dy);
-    canvas.rotate(angle);
+    if (path.isEmpty) {
+      return (position: const Vector3(0, 0, 0), tangent: const Vector3(0, 0, 1));
+    }
+    if (path.length == 1) {
+      return (position: path.first.position, tangent: const Vector3(0, 0, 1));
+    }
 
-    final w = math.min(screenWidth * 0.78, 290.0) * scale;
-    final lTip = 68.0 * scale;
-    final lBand = 48.0 * scale;
+    Vector3 positionAt(double dist) {
+      if (dist <= path.first.distanceAlongPath) return path.first.position;
+      if (dist >= path.last.distanceAlongPath) return path.last.position;
 
-    final path = Path();
-    path.moveTo(lTip, 0);
-    path.lineTo(0, -w * 0.5);
-    path.lineTo(-lBand, -w * 0.5);
-    path.lineTo(lTip - lBand, 0);
-    path.lineTo(-lBand, w * 0.5);
-    path.lineTo(0, w * 0.5);
-    path.close();
+      for (int i = 0; i < path.length - 1; i++) {
+        final d0 = path[i].distanceAlongPath;
+        final d1 = path[i + 1].distanceAlongPath;
+        if (dist >= d0 && dist <= d1) {
+          final span = d1 - d0;
+          final u = span > 0.0001 ? ((dist - d0) / span).clamp(0.0, 1.0) : 0.0;
+          final p0 = path[i].position;
+          final p1 = path[i + 1].position;
+          return Vector3(
+            p0.x + (p1.x - p0.x) * u,
+            p0.y + (p1.y - p0.y) * u,
+            p0.z + (p1.z - p0.z) * u,
+          );
+        }
+      }
+      return path.last.position;
+    }
 
-    final outerHaze = Paint()
-      ..color = const Color(0xFF00E5FF).withValues(alpha: 0.40 * brightness)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 14.0 * scale
-      ..strokeJoin = StrokeJoin.round;
+    final pos = positionAt(targetDistance);
 
+    // Symmetric moving window tangent for ultra-smooth curvature
+    const window = 0.45; // 45cm lookahead/behind window
+    final dBehind = math.max(path.first.distanceAlongPath, targetDistance - window);
+    final dAhead = math.min(path.last.distanceAlongPath, targetDistance + window);
+
+    final pBehind = positionAt(dBehind);
+    final pAhead = positionAt(dAhead);
+
+    final tx = pAhead.x - pBehind.x;
+    final tz = pAhead.z - pBehind.z;
+    final len = math.sqrt(tx * tx + tz * tz);
+
+    Vector3 tangent;
+    if (len > 0.001) {
+      tangent = Vector3(tx / len, 0, tz / len);
+    } else {
+      tangent = const Vector3(0, 0, 1);
+    }
+
+    return (position: pos, tangent: tangent);
+  }
+
+  /// Draws a high-fidelity 3D Chevron lying flat on the floor in true perspective:
+  /// - All 6 vertices are projected from ground plane coordinates
+  /// - Naturally scales and tapers into the distance via camera perspective
+  /// - Holographic cyan gradient fill with soft outer glow and crisp leading V
+  void _draw3dFloorChevron({
+    required Canvas canvas,
+    required Offset pTip,
+    required Offset pRightFront,
+    required Offset pRightBack,
+    required Offset pNotch,
+    required Offset pLeftBack,
+    required Offset pLeftFront,
+    required double scale,
+    required double brightness,
+  }) {
+    final chevronPath = Path()
+      ..moveTo(pTip.dx, pTip.dy)
+      ..lineTo(pRightFront.dx, pRightFront.dy)
+      ..lineTo(pRightBack.dx, pRightBack.dy)
+      ..lineTo(pNotch.dx, pNotch.dy)
+      ..lineTo(pLeftBack.dx, pLeftBack.dy)
+      ..lineTo(pLeftFront.dx, pLeftFront.dy)
+      ..close();
+
+    final leadingV = Path()
+      ..moveTo(pLeftFront.dx, pLeftFront.dy)
+      ..lineTo(pTip.dx, pTip.dy)
+      ..lineTo(pRightFront.dx, pRightFront.dy);
+
+    final bounds = chevronPath.getBounds();
     final fillPaint = Paint()
       ..shader = LinearGradient(
-        begin: Alignment.centerLeft,
-        end: Alignment.centerRight,
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
         colors: [
-          const Color(0xFF00F5FF).withValues(alpha: 0.78 * brightness),
-          const Color(0xFF38BDF8).withValues(alpha: 0.88 * brightness),
-          const Color(0xFF00F5FF).withValues(alpha: 0.78 * brightness),
+          const Color(0xFF38BDF8).withValues(alpha: 0.82 * brightness),
+          const Color(0xFF00E5FF).withValues(alpha: 0.65 * brightness),
         ],
-      ).createShader(Rect.fromLTWH(-lBand, -w * 0.5, lTip + lBand, w))
+      ).createShader(bounds)
       ..style = PaintingStyle.fill;
 
-    final borderPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.85 * brightness)
+    final outerHaze = Paint()
+      ..color = const Color(0xFF00E5FF).withValues(alpha: 0.35 * brightness)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.2 * scale
+      ..strokeWidth = (8.0 * scale).clamp(2.0, 10.0)
       ..strokeJoin = StrokeJoin.round;
 
-    final leadingV = Path();
-    leadingV.moveTo(0, -w * 0.5);
-    leadingV.lineTo(lTip, 0);
-    leadingV.lineTo(0, w * 0.5);
+    final borderPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.70 * brightness)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = (1.8 * scale).clamp(0.8, 2.2)
+      ..strokeJoin = StrokeJoin.round;
 
     final leadingVPaint = Paint()
       ..color = Colors.white.withValues(alpha: 0.95 * brightness)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.5 * scale
+      ..strokeWidth = (3.2 * scale).clamp(1.2, 3.8)
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
 
-    canvas.drawPath(path, outerHaze);
-    canvas.drawPath(path, fillPaint);
-    canvas.drawPath(path, borderPaint);
+    canvas.drawPath(chevronPath, outerHaze);
+    canvas.drawPath(chevronPath, fillPaint);
+    canvas.drawPath(chevronPath, borderPaint);
     canvas.drawPath(leadingV, leadingVPaint);
-
-    canvas.restore();
   }
 
   void _drawTrackingFeatureDots(

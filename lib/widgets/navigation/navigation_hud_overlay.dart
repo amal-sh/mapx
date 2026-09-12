@@ -15,8 +15,10 @@ class NavigationHudOverlay extends StatelessWidget {
   final MapNode destination;
   final Floor floor;
   final String? obstacleWarning;
+  final bool hasReachedDestination;
   final VoidCallback onSelectStartLocation;
   final VoidCallback onNextStep;
+  final VoidCallback? onFinishNavigation;
 
   const NavigationHudOverlay({
     super.key,
@@ -29,8 +31,10 @@ class NavigationHudOverlay extends StatelessWidget {
     required this.destination,
     required this.floor,
     this.obstacleWarning,
+    this.hasReachedDestination = false,
     required this.onSelectStartLocation,
     required this.onNextStep,
+    this.onFinishNavigation,
   });
 
   IconData _getTurnIcon(String instruction) {
@@ -52,8 +56,75 @@ class NavigationHudOverlay extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // Celebratory Destination Reached Card
+        if (hasReachedDestination)
+          Card(
+            color: const Color(0xFF09090B).withValues(alpha: 0.94),
+            elevation: 8,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: const BorderSide(color: Color(0xFF10B981), width: 1.5),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: const Color(0xFF10B981), width: 1.5),
+                    ),
+                    child: const Icon(
+                      CupertinoIcons.checkmark_seal_fill,
+                      size: 26,
+                      color: Color(0xFF10B981),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Destination Reached!',
+                          style: TextStyle(
+                            color: Color(0xFF10B981),
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'You have arrived at ${destination.label}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (onFinishNavigation != null)
+                    FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF10B981),
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: onFinishNavigation,
+                      child: const Text('Finish', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                    ),
+                ],
+              ),
+            ),
+          )
         // Prompt Banner when starting location is not yet chosen
-        if (selectedStartNode == null)
+        else if (selectedStartNode == null)
           Card(
             color: const Color(0xFF09090B).withValues(alpha: 0.94),
             elevation: 8,
@@ -116,7 +187,7 @@ class NavigationHudOverlay extends StatelessWidget {
           ),
 
         // Floating Turn-by-Turn Guidance HUD
-        if (selectedStartNode != null && currentInstruction != null)
+        if (!hasReachedDestination && selectedStartNode != null && currentInstruction != null)
           Card(
             color: const Color(0xFF09090B).withValues(alpha: 0.94),
             elevation: 8,
@@ -202,11 +273,19 @@ class NavigationHudOverlay extends StatelessWidget {
                       ),
                       if (totalInstructionsCount > 1)
                         IconButton(
-                          tooltip: 'Next Step',
-                          icon: const Icon(CupertinoIcons.forward_end_fill, color: Colors.white70, size: 18),
-                          onPressed: currentInstructionIndex < totalInstructionsCount - 1
-                              ? onNextStep
-                              : null,
+                          tooltip: currentInstructionIndex < totalInstructionsCount - 1
+                              ? 'Next Step'
+                              : 'Arrive at Destination',
+                          icon: Icon(
+                            currentInstructionIndex < totalInstructionsCount - 1
+                                ? CupertinoIcons.forward_end_fill
+                                : CupertinoIcons.checkmark_circle_fill,
+                            color: currentInstructionIndex < totalInstructionsCount - 1
+                                ? Colors.white70
+                                : const Color(0xFF10B981),
+                            size: 20,
+                          ),
+                          onPressed: onNextStep,
                         ),
                     ],
                   ),
