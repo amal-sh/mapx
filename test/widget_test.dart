@@ -5,6 +5,7 @@ import 'package:mapx/data/local_map_repository.dart';
 import 'package:mapx/main.dart';
 import 'package:mapx/models/building.dart';
 import 'package:mapx/models/floor.dart';
+import 'package:mapx/widgets/home/empty_buildings_view.dart';
 
 void main() {
   testWidgets('Home screen displays unseeded empty state and creates new building', (
@@ -19,7 +20,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 100));
       await tester.pump(const Duration(milliseconds: 100));
 
-      expect(find.text('MapX'), findsOneWidget);
+      expect(find.byType(EmptyBuildingsView), findsOneWidget);
       expect(find.text('No Buildings Mapped'), findsOneWidget);
       expect(find.text('Create & Map Building'), findsOneWidget);
 

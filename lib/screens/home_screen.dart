@@ -197,9 +197,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     return Scaffold(
+      appBar: AppBar(
+        toolbarHeight: 60,
+        centerTitle: true,
+        automaticallyImplyLeading: false,
+        title: Image.asset(
+          'assets/images/mapx_logo_transp.png',
+          height: 44,
+          fit: BoxFit.contain,
+        ),
+      ),
       body: SafeArea(
         child: _loading
             ? const Center(child: CircularProgressIndicator())
@@ -208,45 +216,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 : ListView(
                     padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
                     children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF09090B),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Icon(CupertinoIcons.compass, color: Colors.white, size: 22),
-                          ),
-                          const SizedBox(width: 12),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'MapX',
-                                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                              ),
-                              Text(
-                                'AR indoor navigation',
-                                style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
-                              ),
-                            ],
-                          ),
-                          const Spacer(),
-                          FilledButton.icon(
-                            style: FilledButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                            ),
-                            icon: const Icon(CupertinoIcons.plus, size: 16),
-                            label: const Text('Add Building'),
-                            onPressed: _showCreateBuildingDialog,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 24),
                       Text(
                         'Mapped Buildings (${_allBuildings.length})',
                         style: Theme.of(context).textTheme.titleMedium?.copyWith(
