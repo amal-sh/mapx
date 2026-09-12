@@ -8,4 +8,16 @@ class Building {
     required this.name,
     required this.entryFloorId,
   });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'entryFloorId': entryFloorId,
+      };
+
+  factory Building.fromJson(Map<String, dynamic> json) => Building(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        entryFloorId: json['entryFloorId'] as String? ?? '',
+      );
 }

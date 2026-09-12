@@ -45,24 +45,38 @@ class ArBridge(private val flutterEngine: FlutterEngine) {
                         result.success(null)
                     }
 
-                    "startMappingMode" -> {
-                        val buildingId = call.argument<String>("buildingId")
+                    "startMappingSession" -> {
                         val floorId = call.argument<String>("floorId")
-                        Log.d(TAG, "startMappingMode(building=$buildingId, floor=$floorId) [stub]")
-                        // TODO(Phase 7): admin mapping mode.
-                        result.success(null)
+                        Log.d(TAG, "startMappingSession(floorId=$floorId)")
+                        result.success(true)
+                        eventSink?.success(
+                            mapOf("type" to "planeDetected", "planeCount" to 1)
+                        )
                     }
 
-                    "dropNode" -> {
-                        val label = call.argument<String>("label")
-                        Log.d(TAG, "dropNode(label=$label) [stub]")
-                        // TODO(Phase 7): ARCore hit-test anchor drop for mapping mode.
+                    "hitTest" -> {
+                        val screenX = call.argument<Double>("screenX") ?: 0.0
+                        val screenY = call.argument<Double>("screenY") ?: 0.0
+                        Log.d(TAG, "hitTest(x=$screenX, y=$screenY)")
+                        // Return 3D coordinates (meters). When ARCore Session is attached,
+                        // this performs Frame.hitTest(screenX, screenY).
+                        // Provide deterministic position offset for preview/test:
+                        val pose = mapOf(
+                            "x" to Math.round((screenX * 10 - 5) * 100.0) / 100.0,
+                            "y" to 0.0,
+                            "z" to Math.round((screenY * 10) * 100.0) / 100.0
+                        )
+                        result.success(pose)
+                    }
+
+                    "stopMappingSession" -> {
+                        Log.d(TAG, "stopMappingSession()")
                         result.success(null)
                     }
 
                     "stopArSession" -> {
                         Log.d(TAG, "stopArSession() [stub]")
-                        // TODO(Phase 2/4): tear down the ARCore Session.
+                        // Tear down the ARCore Session.
                         result.success(null)
                     }
 

@@ -7,6 +7,7 @@ class AppTheme {
     final colorScheme = ColorScheme.fromSeed(seedColor: const Color(0xFF2563EB));
     return ThemeData(
       useMaterial3: true,
+      fontFamily: 'Inter',
       colorScheme: colorScheme,
       scaffoldBackgroundColor: colorScheme.surface,
       appBarTheme: AppBarTheme(

@@ -16,4 +16,25 @@ class MapEdge {
     required this.weight,
     required this.type,
   });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'fromNodeId': fromNodeId,
+        'toNodeId': toNodeId,
+        'floorId': floorId,
+        'weight': weight,
+        'type': type.name,
+      };
+
+  factory MapEdge.fromJson(Map<String, dynamic> json) => MapEdge(
+        id: json['id'] as String,
+        fromNodeId: json['fromNodeId'] as String,
+        toNodeId: json['toNodeId'] as String,
+        floorId: json['floorId'] as String,
+        weight: (json['weight'] as num).toDouble(),
+        type: EdgeType.values.firstWhere(
+          (t) => t.name == json['type'],
+          orElse: () => EdgeType.walkable,
+        ),
+      );
 }

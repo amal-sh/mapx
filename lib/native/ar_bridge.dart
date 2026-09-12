@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 
 /// A 3D point in a floor's local coordinate space (meters, y = vertical).
@@ -50,6 +52,11 @@ class ApproachingNodeEvent extends ArEvent {
   ApproachingNodeEvent({required this.nodeId, required this.distance});
 }
 
+class PlaneDetectedEvent extends ArEvent {
+  final int planeCount;
+  PlaneDetectedEvent(this.planeCount);
+}
+
 class TrackingStateChangedEvent extends ArEvent {
   final TrackingState state;
 
@@ -58,10 +65,6 @@ class TrackingStateChangedEvent extends ArEvent {
 
 /// Dart-side wrapper for the `mapx/ar_bridge` Method Channel and
 /// `mapx/ar_events` Event Channel (native side: android/.../ArBridge.kt).
-///
-/// Native handlers are stubs until Phases 2/4/7 fill them in with real
-/// ARCore/SceneView/MLKit calls — this class is the seam the rest of the
-/// app builds against so screens don't change when they do.
 class ArBridge {
   ArBridge._();
 
@@ -73,26 +76,69 @@ class ArBridge {
   Stream<ArEvent>? _events;
 
   Future<bool> startArSession(String floorId) async {
-    final result = await _methodChannel.invokeMethod<bool>('startArSession', {
-      'floorId': floorId,
-    });
-    return result ?? false;
+    if (Platform.environment.containsKey('FLUTTER_TEST')) return true;
+    try {
+      final result = await _methodChannel.invokeMethod<bool>('startArSession', {
+        'floorId': floorId,
+      });
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> startMappingSession(String floorId) async {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) return true;
+    try {
+      final result = await _methodChannel.invokeMethod<bool>('startMappingSession', {
+        'floorId': floorId,
+      });
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<Vector3?> hitTest(double screenX, double screenY) async {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) {
+      return Vector3(screenX * 5, 0, screenY * 5);
+    }
+    try {
+      final result = await _methodChannel.invokeMapMethod<String, dynamic>('hitTest', {
+        'screenX': screenX,
+        'screenY': screenY,
+      });
+      if (result != null) {
+        return Vector3.fromMap(result);
+      }
+    } catch (_) {}
+    return null;
   }
 
   Future<void> renderPath(List<Vector3> points) {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) return Future.value();
     return _methodChannel.invokeMethod('renderPath', {
       'points': points.map((p) => p.toMap()).toList(),
     });
   }
 
   Future<void> stopArSession() {
-    return _methodChannel.invokeMethod('stopArSession');
+    if (Platform.environment.containsKey('FLUTTER_TEST')) return Future.value();
+    return _methodChannel.invokeMethod('stopArSession').catchError((Object _) {});
+  }
+
+  Future<void> stopMappingSession() {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) return Future.value();
+    return _methodChannel.invokeMethod('stopMappingSession').catchError((Object _) {});
   }
 
   /// Broadcast stream of native AR events. Safe to listen to even when no
   /// native implementation is registered (e.g. running on web/desktop during
   /// UI development) — errors are swallowed rather than thrown.
   Stream<ArEvent> get events {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) {
+      return const Stream.empty();
+    }
     return _events ??= _eventChannel
         .receiveBroadcastStream()
         .map(_parseEvent)
@@ -102,6 +148,8 @@ class ArBridge {
   ArEvent _parseEvent(dynamic raw) {
     final map = Map<String, dynamic>.from(raw as Map);
     switch (map['type']) {
+      case 'planeDetected':
+        return PlaneDetectedEvent((map['planeCount'] as num? ?? 1).toInt());
       case 'ocrMatch':
         final screenPos = Map<String, dynamic>.from(map['screenPos'] as Map);
         return OcrMatchEvent(

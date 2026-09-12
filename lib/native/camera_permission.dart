@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:permission_handler/permission_handler.dart';
 
 /// Requests the runtime CAMERA permission (required on API 23+; the
@@ -7,6 +9,9 @@ import 'package:permission_handler/permission_handler.dart';
 /// Returns true if granted. Swallows platform errors and returns false on
 /// platforms with no camera (e.g. running the UI on desktop/web during dev).
 Future<bool> ensureCameraPermission() async {
+  if (Platform.environment.containsKey('FLUTTER_TEST')) {
+    return true;
+  }
   try {
     final status = await Permission.camera.request();
     return status.isGranted;

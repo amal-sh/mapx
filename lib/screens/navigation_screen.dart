@@ -48,12 +48,19 @@ class _NavigationScreenState extends State<NavigationScreen> {
     final nodes = await widget.repository.getNodes(widget.floor.id);
     final edges = await widget.repository.getEdges(widget.floor.id);
 
-    // TODO(Phase 2): starting node should come from OCR + AR hit-test
-    // localization instead of being assumed as the floor entrance.
+    // Resolve start node dynamically: look for Entrance, otherwise pick first non-destination node
+    final startNode = nodes.firstWhere(
+      (n) => n.id == 'entrance' || n.label.toLowerCase().contains('entrance'),
+      orElse: () => nodes.firstWhere(
+        (n) => n.id != widget.destination.id,
+        orElse: () => widget.destination,
+      ),
+    );
+
     final path = findPath(
       nodes: nodes,
       edges: edges,
-      startNodeId: 'entrance',
+      startNodeId: startNode.id,
       endNodeId: widget.destination.id,
     );
 
