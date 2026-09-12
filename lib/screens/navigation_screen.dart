@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../data/map_repository.dart';
@@ -280,10 +281,10 @@ class _NavigationScreenState extends State<NavigationScreen>
 
   IconData _getTurnIcon(String instruction) {
     final lower = instruction.toLowerCase();
-    if (lower.contains('left')) return Icons.turn_left;
-    if (lower.contains('right')) return Icons.turn_right;
-    if (lower.contains('arrive')) return Icons.place;
-    return Icons.straight;
+    if (lower.contains('left')) return CupertinoIcons.arrow_turn_up_left;
+    if (lower.contains('right')) return CupertinoIcons.arrow_turn_up_right;
+    if (lower.contains('arrive')) return CupertinoIcons.placemark_fill;
+    return CupertinoIcons.arrow_up;
   }
 
   Widget _buildArViewport() {
@@ -331,7 +332,6 @@ class _NavigationScreenState extends State<NavigationScreen>
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     final currentInst = _currentInstruction;
 
     return Scaffold(
@@ -365,7 +365,7 @@ class _NavigationScreenState extends State<NavigationScreen>
                       CircleAvatar(
                         backgroundColor: Colors.black.withValues(alpha: 0.65),
                         child: IconButton(
-                          icon: const Icon(Icons.arrow_back, color: Colors.white),
+                          icon: const Icon(CupertinoIcons.chevron_left, color: Colors.white, size: 20),
                           onPressed: () => Navigator.of(context).pop(),
                         ),
                       ),
@@ -386,8 +386,8 @@ class _NavigationScreenState extends State<NavigationScreen>
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: (_arSessionActive && _trackingState == TrackingState.normal)
-                                    ? Colors.greenAccent
-                                    : Colors.amberAccent,
+                                    ? Colors.white
+                                    : Colors.white60,
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -411,17 +411,17 @@ class _NavigationScreenState extends State<NavigationScreen>
                       Container(
                         decoration: BoxDecoration(
                           color: _isSimulatingWalk
-                              ? Colors.green.withValues(alpha: 0.8)
+                              ? Colors.white.withValues(alpha: 0.25)
                               : Colors.black.withValues(alpha: 0.75),
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
-                            color: _isSimulatingWalk ? Colors.greenAccent : Colors.white12,
+                            color: _isSimulatingWalk ? Colors.white : Colors.white12,
                           ),
                         ),
                         child: IconButton(
                           tooltip: _isSimulatingWalk ? 'Pause Walk' : 'Simulate Walk',
                           icon: Icon(
-                            _isSimulatingWalk ? Icons.pause : Icons.directions_walk,
+                            _isSimulatingWalk ? CupertinoIcons.pause_fill : CupertinoIcons.play_fill,
                             color: Colors.white,
                             size: 20,
                           ),
@@ -439,7 +439,7 @@ class _NavigationScreenState extends State<NavigationScreen>
                         child: IconButton(
                           tooltip: _show2dFloorMap ? 'Switch to AR View' : 'Switch to 2D Floor Map',
                           icon: Icon(
-                            _show2dFloorMap ? Icons.view_in_ar : Icons.map_outlined,
+                            _show2dFloorMap ? CupertinoIcons.cube_box : CupertinoIcons.map,
                             color: Colors.white,
                             size: 20,
                           ),
@@ -459,7 +459,7 @@ class _NavigationScreenState extends State<NavigationScreen>
                     left: 16,
                     right: 16,
                     child: Card(
-                      color: const Color(0xFF0F172A).withValues(alpha: 0.90),
+                      color: const Color(0xFF09090B).withValues(alpha: 0.92),
                       elevation: 8,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
@@ -472,13 +472,13 @@ class _NavigationScreenState extends State<NavigationScreen>
                             Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: colorScheme.primaryContainer,
+                                color: Colors.white.withValues(alpha: 0.12),
                                 shape: BoxShape.circle,
                               ),
                               child: Icon(
                                 _getTurnIcon(currentInst.instruction),
-                                size: 28,
-                                color: colorScheme.onPrimaryContainer,
+                                size: 24,
+                                color: Colors.white,
                               ),
                             ),
                             const SizedBox(width: 16),
@@ -509,7 +509,7 @@ class _NavigationScreenState extends State<NavigationScreen>
                             if (_turnInstructions.length > 1)
                               IconButton(
                                 tooltip: 'Next Step',
-                                icon: const Icon(Icons.skip_next, color: Colors.white70),
+                                icon: const Icon(CupertinoIcons.forward_end_fill, color: Colors.white70, size: 18),
                                 onPressed: _currentInstructionIndex < _turnInstructions.length - 1
                                     ? () => setState(() => _currentInstructionIndex++)
                                     : null,
@@ -529,12 +529,13 @@ class _NavigationScreenState extends State<NavigationScreen>
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                       decoration: BoxDecoration(
-                        color: Colors.amber.shade900.withValues(alpha: 0.9),
+                        color: const Color(0xFF18181B).withValues(alpha: 0.95),
                         borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.white24),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.warning_amber_rounded, color: Colors.white),
+                          const Icon(CupertinoIcons.exclamationmark_triangle_fill, color: Colors.white, size: 20),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
@@ -574,7 +575,7 @@ class _NavigationScreenState extends State<NavigationScreen>
                   right: 0,
                   child: Container(
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0F172A).withValues(alpha: 0.95),
+                      color: const Color(0xFF09090B).withValues(alpha: 0.96),
                       borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
                       border: const Border(top: BorderSide(color: Colors.white12)),
                     ),
@@ -614,9 +615,15 @@ class _NavigationScreenState extends State<NavigationScreen>
                                 ),
                               ],
                             ),
-                            FilledButton.tonal(
+                            FilledButton(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.white,
+                                foregroundColor: Colors.black,
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
                               onPressed: () => Navigator.of(context).pop(),
-                              child: const Text('End Route'),
+                              child: const Text('End Route', style: TextStyle(fontWeight: FontWeight.w600)),
                             ),
                           ],
                         ),
@@ -674,7 +681,7 @@ class _ArPerspectiveSimulationView extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const Icon(
-                      Icons.view_in_ar,
+                      CupertinoIcons.cube_box,
                       color: Colors.white12,
                       size: 64,
                     ),
@@ -1283,7 +1290,7 @@ class _MiniMapRadar extends StatelessWidget {
                 child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.fullscreen, color: Colors.white70, size: 12),
+                    Icon(CupertinoIcons.fullscreen, color: Colors.white70, size: 12),
                     SizedBox(width: 2),
                     Text(
                       '2D',

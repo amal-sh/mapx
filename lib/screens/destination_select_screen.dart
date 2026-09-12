@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../data/map_repository.dart';
@@ -40,22 +41,28 @@ class _DestinationSelectScreenState extends State<DestinationSelectScreen> {
   IconData _iconFor(NodeType type) {
     switch (type) {
       case NodeType.room:
-        return Icons.meeting_room_outlined;
+        return CupertinoIcons.square_grid_2x2;
       case NodeType.junction:
-        return Icons.call_split;
+        return CupertinoIcons.arrow_branch;
       case NodeType.stair:
-        return Icons.stairs_outlined;
+        return CupertinoIcons.arrow_up_right;
       case NodeType.elevator:
-        return Icons.elevator_outlined;
+        return CupertinoIcons.arrow_up_arrow_down;
       case NodeType.doorway:
-        return Icons.door_front_door_outlined;
+        return CupertinoIcons.square_split_1x2;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Select destination')),
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(CupertinoIcons.chevron_left, size: 22),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: const Text('Select destination'),
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _rooms.isEmpty
@@ -65,15 +72,23 @@ class _DestinationSelectScreenState extends State<DestinationSelectScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(
-                          Icons.map_outlined,
-                          size: 56,
-                          color: Theme.of(context).colorScheme.outlineVariant,
+                        Container(
+                          width: 64,
+                          height: 64,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF4F4F5),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Icon(
+                            CupertinoIcons.map,
+                            size: 32,
+                            color: Color(0xFF71717A),
+                          ),
                         ),
                         const SizedBox(height: 16),
                         const Text(
                           'No rooms mapped yet',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                         ),
                         const SizedBox(height: 8),
                         Text(
@@ -81,6 +96,7 @@ class _DestinationSelectScreenState extends State<DestinationSelectScreen> {
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            fontSize: 13,
                           ),
                         ),
                       ],
@@ -90,7 +106,7 @@ class _DestinationSelectScreenState extends State<DestinationSelectScreen> {
               : ListView.separated(
                   padding: const EdgeInsets.all(16),
                   itemCount: _rooms.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 8),
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (context, index) {
                     final room = _rooms[index];
                     final label = room.label.toLowerCase().startsWith('room')
@@ -98,20 +114,39 @@ class _DestinationSelectScreenState extends State<DestinationSelectScreen> {
                         : 'Room ${room.label}';
 
                     return Card(
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        side: const BorderSide(color: Color(0xFFE5E5EA), width: 1),
+                      ),
                       child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                        leading: CircleAvatar(
-                          backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                        leading: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF4F4F5),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                           child: Icon(
                             _iconFor(room.type),
-                            color: Theme.of(context).colorScheme.onPrimaryContainer,
+                            color: const Color(0xFF09090B),
+                            size: 20,
                           ),
                         ),
                         title: Text(
                           label,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
+                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
                         ),
-                        trailing: const Icon(Icons.chevron_right),
+                        subtitle: const Text(
+                          'Tap to start AR navigation',
+                          style: TextStyle(color: Color(0xFF71717A), fontSize: 12),
+                        ),
+                        trailing: const Icon(
+                          CupertinoIcons.chevron_right,
+                          size: 16,
+                          color: Color(0xFFA1A1AA),
+                        ),
                         onTap: () {
                           Navigator.of(context).push(
                             MaterialPageRoute(

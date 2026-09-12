@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../data/map_repository.dart';
@@ -206,8 +207,10 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                     decoration: InputDecoration(
                       labelText: 'Node Label / Room Number',
                       hintText: 'e.g. 101, Lab 2, Main Entrance',
-                      filled: true,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE4E4E7))),
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE4E4E7))),
+                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF09090B), width: 1.5)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -226,6 +229,15 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                       return ChoiceChip(
                         label: Text(type.name.toUpperCase()),
                         selected: isSelected,
+                        selectedColor: const Color(0xFF09090B),
+                        backgroundColor: const Color(0xFFF4F4F5),
+                        labelStyle: TextStyle(
+                          color: isSelected ? Colors.white : const Color(0xFF09090B),
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                        side: BorderSide.none,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         onSelected: (val) {
                           if (val) setModalState(() => selectedType = type);
                         },
@@ -236,7 +248,7 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
-                      icon: const Icon(Icons.add_location_alt),
+                      icon: const Icon(CupertinoIcons.map_pin_ellipse, size: 18),
                       label: const Text('Confirm & Drop Node'),
                       onPressed: () {
                         final label = labelController.text.trim().isEmpty
@@ -523,7 +535,8 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                                       children: [
                                         IconButton(
                                           icon: Icon(
-                                            Icons.link,
+                                            CupertinoIcons.link,
+                                            size: 20,
                                             color: _linkSourceNode?.id == node.id
                                                 ? colorScheme.primary
                                                 : colorScheme.onSurfaceVariant,
@@ -535,7 +548,7 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                                           },
                                         ),
                                         IconButton(
-                                          icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                                          icon: const Icon(CupertinoIcons.trash, size: 18, color: Color(0xFFDC2626)),
                                           onPressed: () {
                                             _deleteNode(node);
                                             setInspectorState(() {});
@@ -564,6 +577,10 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(CupertinoIcons.chevron_left, size: 22),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -584,20 +601,27 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
           IconButton(
             tooltip: 'View Placed Nodes',
             icon: Badge(
+              backgroundColor: const Color(0xFF09090B),
               label: Text('${_nodes.length}'),
-              child: const Icon(Icons.account_tree_outlined),
+              child: const Icon(CupertinoIcons.list_bullet_indent, size: 22),
             ),
             onPressed: _showInspector,
           ),
           Padding(
             padding: const EdgeInsets.only(right: 4),
-            child: FilledButton.tonal(
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF09090B),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
               onPressed: _nodes.isEmpty ? null : _saveAndExit,
-              child: const Text('Save'),
+              child: const Text('Save', style: TextStyle(fontWeight: FontWeight.w600)),
             ),
           ),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
+            icon: const Icon(CupertinoIcons.ellipsis_vertical, size: 20),
             tooltip: 'Floor options',
             onSelected: (value) {
               if (value == 'clear') {
@@ -610,9 +634,9 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                 enabled: _nodes.isNotEmpty || _edges.isNotEmpty,
                 child: const Row(
                   children: [
-                    Icon(Icons.delete_sweep_outlined, size: 20, color: Colors.red),
+                    Icon(CupertinoIcons.trash, size: 18, color: Color(0xFFDC2626)),
                     SizedBox(width: 10),
-                    Text('Clear Floor Map', style: TextStyle(color: Colors.red)),
+                    Text('Clear Floor Map', style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.w500)),
                   ],
                 ),
               ),
@@ -641,7 +665,7 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                               ),
                             )
                           else
-                            Container(color: const Color(0xFF0F172A)),
+                            Container(color: const Color(0xFF09090B)),
 
                           GestureDetector(
                             onTapUp: (details) => _handleViewportTap(details, constraints),
@@ -656,9 +680,9 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Icon(
-                                      _isLinkingMode ? Icons.touch_app : Icons.add_circle_outline,
+                                      _isLinkingMode ? CupertinoIcons.hand_point_right : CupertinoIcons.plus_circle,
                                       color: Colors.white70,
-                                      size: 44,
+                                      size: 40,
                                     ),
                                     const SizedBox(height: 8),
                                     Container(
@@ -760,20 +784,21 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                           decoration: BoxDecoration(
-                            color: colorScheme.primaryContainer,
+                            color: const Color(0xFF09090B),
                             borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: Colors.white24),
                           ),
                           child: Row(
                             children: [
-                              Icon(Icons.link, color: colorScheme.onPrimaryContainer),
+                              const Icon(CupertinoIcons.link, color: Colors.white, size: 20),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Text(
                                   _linkSourceNode == null
                                       ? 'Select first node to connect'
                                       : 'Selected "${_linkSourceNode!.label}". Select second node.',
-                                  style: TextStyle(
-                                    color: colorScheme.onPrimaryContainer,
+                                  style: const TextStyle(
+                                    color: Colors.white,
                                     fontWeight: FontWeight.w600,
                                     fontSize: 13,
                                   ),
@@ -825,7 +850,7 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                                     child: Column(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Icon(Icons.add_location_alt_outlined, color: Colors.white, size: 20),
+                                        Icon(CupertinoIcons.map_pin_ellipse, color: Colors.white, size: 20),
                                         SizedBox(height: 3),
                                         Text('Add Node', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
                                       ],
@@ -849,10 +874,10 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Icon(
-                                          Icons.polyline_outlined,
+                                          CupertinoIcons.waveform_path,
                                           color: _nodes.length < 2
                                               ? Colors.white38
-                                              : (_isLinkingMode ? colorScheme.primary : Colors.white),
+                                              : (_isLinkingMode ? Colors.white : Colors.white70),
                                           size: 20,
                                         ),
                                         const SizedBox(height: 3),
@@ -861,7 +886,7 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                                           style: TextStyle(
                                             color: _nodes.length < 2
                                                 ? Colors.white38
-                                                : (_isLinkingMode ? colorScheme.primary : Colors.white),
+                                                : (_isLinkingMode ? Colors.white : Colors.white70),
                                             fontSize: 11,
                                             fontWeight: FontWeight.w600,
                                           ),
@@ -881,7 +906,7 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                                     child: Column(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        const Icon(Icons.list_alt, color: Colors.white, size: 20),
+                                        const Icon(CupertinoIcons.list_bullet, color: Colors.white, size: 20),
                                         const SizedBox(height: 3),
                                         Text(
                                           '${_nodes.length} Nodes',

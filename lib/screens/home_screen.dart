@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../data/local_map_repository.dart';
@@ -91,26 +92,39 @@ class _HomeScreenState extends State<HomeScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) => Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFD4D4D8),
+                  borderRadius: BorderRadius.circular(2.5),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
             Text(
               title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
             Text(
               building.name,
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 13),
             ),
             const SizedBox(height: 16),
             ...floors.map(
               (f) => ListTile(
-                leading: const Icon(Icons.layers_outlined),
-                title: Text(f.name),
-                subtitle: Text('Level ${f.level}'),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                leading: const Icon(CupertinoIcons.square_stack_3d_up, size: 20),
+                title: Text(f.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: Text('Level ${f.level}', style: const TextStyle(color: Color(0xFF71717A))),
+                trailing: const Icon(CupertinoIcons.chevron_right, size: 16, color: Color(0xFFA1A1AA)),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   onFloorSelected(f);
@@ -215,12 +229,24 @@ class _HomeScreenState extends State<HomeScreen> {
             TextField(
               controller: buildingController,
               autofocus: true,
-              decoration: const InputDecoration(labelText: 'Building Name'),
+              decoration: InputDecoration(
+                labelText: 'Building Name',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE4E4E7))),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE4E4E7))),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF09090B), width: 1.5)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: floorController,
-              decoration: const InputDecoration(labelText: 'Floor Name'),
+              decoration: InputDecoration(
+                labelText: 'Floor Name',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE4E4E7))),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE4E4E7))),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF09090B), width: 1.5)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              ),
             ),
           ],
         ),
@@ -284,10 +310,10 @@ class _HomeScreenState extends State<HomeScreen> {
                               width: 48,
                               height: 48,
                               decoration: BoxDecoration(
-                                color: colorScheme.primary,
+                                color: const Color(0xFF09090B),
                                 borderRadius: BorderRadius.circular(14),
                               ),
-                              child: const Icon(Icons.explore, color: Colors.white),
+                              child: const Icon(CupertinoIcons.compass, color: Colors.white, size: 24),
                             ),
                             const SizedBox(width: 12),
                             Text(
@@ -311,8 +337,16 @@ class _HomeScreenState extends State<HomeScreen> {
                             padding: const EdgeInsets.all(24),
                             child: Column(
                               children: [
-                                Icon(Icons.add_business_outlined, size: 48, color: colorScheme.primary),
-                                const SizedBox(height: 12),
+                                Container(
+                                  width: 64,
+                                  height: 64,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF4F4F5),
+                                    borderRadius: BorderRadius.circular(18),
+                                  ),
+                                  child: const Icon(CupertinoIcons.building_2_fill, size: 32, color: Color(0xFF09090B)),
+                                ),
+                                const SizedBox(height: 16),
                                 Text(
                                   'No Buildings Mapped',
                                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -325,11 +359,11 @@ class _HomeScreenState extends State<HomeScreen> {
                                   textAlign: TextAlign.center,
                                   style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 13),
                                 ),
-                                const SizedBox(height: 16),
+                                const SizedBox(height: 20),
                                 SizedBox(
                                   width: double.infinity,
                                   child: FilledButton.icon(
-                                    icon: const Icon(Icons.add),
+                                    icon: const Icon(CupertinoIcons.plus, size: 18),
                                     label: const Text('Create & Map Building'),
                                     onPressed: _showCreateBuildingDialog,
                                   ),
@@ -351,10 +385,10 @@ class _HomeScreenState extends State<HomeScreen> {
                             width: 44,
                             height: 44,
                             decoration: BoxDecoration(
-                              color: colorScheme.primary,
+                              color: const Color(0xFF09090B),
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: const Icon(Icons.explore, color: Colors.white, size: 24),
+                            child: const Icon(CupertinoIcons.compass, color: Colors.white, size: 22),
                           ),
                           const SizedBox(width: 12),
                           Column(
@@ -373,8 +407,11 @@ class _HomeScreenState extends State<HomeScreen> {
                             ],
                           ),
                           const Spacer(),
-                          FilledButton.tonalIcon(
-                            icon: const Icon(Icons.add, size: 18),
+                          FilledButton.icon(
+                            style: FilledButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            ),
+                            icon: const Icon(CupertinoIcons.plus, size: 16),
                             label: const Text('Add Building'),
                             onPressed: _showCreateBuildingDialog,
                           ),
@@ -384,7 +421,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       Text(
                         'Mapped Buildings (${_allBuildings.length})',
                         style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
+                              fontWeight: FontWeight.w700,
                             ),
                       ),
                       const SizedBox(height: 12),
@@ -400,7 +437,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             elevation: 0,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16),
-                              side: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
+                              side: const BorderSide(color: Color(0xFFE5E5EA), width: 1),
                             ),
                             child: Padding(
                               padding: const EdgeInsets.all(20),
@@ -411,12 +448,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Container(
-                                        padding: const EdgeInsets.all(10),
+                                        width: 44,
+                                        height: 44,
                                         decoration: BoxDecoration(
-                                          color: colorScheme.primaryContainer,
+                                          color: const Color(0xFFF4F4F5),
                                           borderRadius: BorderRadius.circular(12),
                                         ),
-                                        child: Icon(Icons.apartment, color: colorScheme.onPrimaryContainer),
+                                        child: const Icon(CupertinoIcons.building_2_fill, size: 22, color: Color(0xFF09090B)),
                                       ),
                                       const SizedBox(width: 12),
                                       Expanded(
@@ -440,7 +478,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         ),
                                       ),
                                       PopupMenuButton<String>(
-                                        icon: const Icon(Icons.more_vert),
+                                        icon: const Icon(CupertinoIcons.ellipsis_vertical, size: 18, color: Color(0xFF71717A)),
                                         tooltip: 'Map options',
                                         onSelected: (value) {
                                           if (value == 'delete') {
@@ -452,9 +490,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                             value: 'delete',
                                             child: Row(
                                               children: [
-                                                Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                                                Icon(CupertinoIcons.trash, size: 18, color: Color(0xFFDC2626)),
                                                 SizedBox(width: 10),
-                                                Text('Delete Map', style: TextStyle(color: Colors.red)),
+                                                Text('Delete Map', style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.w500)),
                                               ],
                                             ),
                                           ),
@@ -466,7 +504,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   SizedBox(
                                     width: double.infinity,
                                     child: ElevatedButton.icon(
-                                      icon: const Icon(Icons.navigation),
+                                      icon: const Icon(CupertinoIcons.location_fill, size: 16),
                                       label: const Text('Where do you want to go?'),
                                       onPressed: floors.isEmpty ? null : () => _onNavigate(building, floors),
                                     ),
@@ -475,7 +513,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   SizedBox(
                                     width: double.infinity,
                                     child: OutlinedButton.icon(
-                                      icon: const Icon(Icons.edit_road_outlined),
+                                      icon: const Icon(CupertinoIcons.map, size: 16),
                                       label: const Text('Admin AR Mapping Mode'),
                                       onPressed: () => _onAdminMap(building, floors),
                                     ),
@@ -488,7 +526,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       }),
                       const SizedBox(height: 8),
                       OutlinedButton.icon(
-                        icon: const Icon(Icons.add_business_outlined),
+                        icon: const Icon(CupertinoIcons.plus, size: 16),
                         label: const Text('Add Another Building'),
                         onPressed: _showCreateBuildingDialog,
                       ),
