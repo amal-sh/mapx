@@ -21,6 +21,7 @@ import '../native/ar_bridge.dart';
 import '../native/camera_permission.dart';
 import '../widgets/mapping/ar_mapping_perspective_painter.dart';
 import '../widgets/mapping/mapping_controls_bar.dart';
+import '../widgets/mapping/native_ar_scene_view.dart';
 import '../widgets/mapping/mapping_inspector_sheet.dart';
 import '../widgets/mapping/mapping_mini_map.dart';
 import '../widgets/mapping/node_form_dialog.dart';
@@ -161,7 +162,7 @@ class _AdminMappingScreenState extends State<AdminMappingScreen>
 
   Future<void> _initCamera() async {
     if (Platform.environment.containsKey('FLUTTER_TEST')) return;
-    // On Android devices, SceneView ARSceneView manages the camera hardware directly.
+    // On Android devices, SceneView ARSceneView exclusively manages camera hardware.
     if (Platform.isAndroid) return;
     final granted = await ensureCameraPermission();
     if (!granted) return;
@@ -999,9 +1000,7 @@ class _AdminMappingScreenState extends State<AdminMappingScreen>
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          if (Platform.isAndroid && !Platform.environment.containsKey('FLUTTER_TEST'))
-                            const AndroidView(viewType: 'mapx/ar_scene_view')
-                          else if (_cameraInitialized && _cameraController != null)
+                          if (_cameraInitialized && _cameraController != null)
                             FittedBox(
                               fit: BoxFit.cover,
                               child: SizedBox(
@@ -1010,6 +1009,8 @@ class _AdminMappingScreenState extends State<AdminMappingScreen>
                                 child: CameraPreview(_cameraController!),
                               ),
                             )
+                          else if (Platform.isAndroid && !Platform.environment.containsKey('FLUTTER_TEST'))
+                            const NativeArSceneView()
                           else
                             Container(color: const Color(0xFF09090B)),
 

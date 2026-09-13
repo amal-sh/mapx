@@ -1,12 +1,16 @@
 package com.example.mapx
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Color
 import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.TextView
+import androidx.activity.ComponentActivity
+import androidx.lifecycle.LifecycleOwner
 import com.google.ar.core.Config
 import com.google.ar.core.Frame
 import com.google.ar.core.Plane
@@ -33,6 +37,7 @@ private const val TAG = "ArScenePlatformView"
  */
 class ArScenePlatformView(
     private val context: Context,
+    private val activity: Activity?,
     private val id: Int,
     private val creationParams: Map<String?, Any?>?
 ) : PlatformView {
@@ -41,15 +46,40 @@ class ArScenePlatformView(
     private var arSceneView: ARSceneView? = null
     private var currentFrame: Frame? = null
     private val activeArrowNodes = mutableListOf<Node>()
+    private val hostActivity: Activity? = activity ?: findActivity(context)
+    private val lifecycleOwner: LifecycleOwner? = hostActivity as? LifecycleOwner ?: findLifecycleOwner(context)
+    private var isSessionResumed = false
 
     init {
         containerView.setBackgroundColor(Color.parseColor("#0B0F19"))
         initializeSceneView()
     }
 
+    private fun findActivity(ctx: Context): Activity? {
+        var current: Context? = ctx
+        while (current is ContextWrapper) {
+            if (current is Activity) return current
+            current = current.baseContext
+        }
+        return null
+    }
+
+    private fun findLifecycleOwner(ctx: Context): LifecycleOwner? {
+        var current: Context? = ctx
+        while (current is ContextWrapper) {
+            if (current is LifecycleOwner) return current
+            current = current.baseContext
+        }
+        return null
+    }
+
     private fun initializeSceneView() {
         try {
             val sceneView = ARSceneView(context)
+            val lc = lifecycleOwner?.lifecycle
+            if (lc != null) {
+                sceneView.lifecycle = lc
+            }
             arSceneView = sceneView
             containerView.addView(
                 sceneView,
@@ -93,6 +123,29 @@ class ArScenePlatformView(
                 gravity = Gravity.BOTTOM or Gravity.START
             }
             containerView.addView(fallbackBadge)
+        }
+    }
+
+    fun resumeSession() {
+        if (isSessionResumed) return
+        try {
+            val compAct = (hostActivity ?: findActivity(context)) as? ComponentActivity
+            arSceneView?.arCore?.resume(context, compAct)
+            isSessionResumed = true
+            Log.d(TAG, "resumeSession: ARCore resumed.")
+        } catch (e: Throwable) {
+            Log.w(TAG, "resumeSession notice: ${e.message}")
+        }
+    }
+
+    fun pauseSession() {
+        if (!isSessionResumed) return
+        try {
+            arSceneView?.arCore?.pause()
+            isSessionResumed = false
+            Log.d(TAG, "pauseSession: ARCore paused.")
+        } catch (e: Throwable) {
+            Log.w(TAG, "pauseSession notice: ${e.message}")
         }
     }
 
@@ -216,26 +269,31 @@ class ArScenePlatformView(
     override fun dispose() {
         try {
             onClearPath()
+            pauseSession()
             arSceneView?.destroy()
             arSceneView = null
             currentFrame = null
+            if (ArBridge.activePlatformView === this) {
+                ArBridge.activePlatformView = null
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Error disposing AR scene: ${e.message}")
         }
     }
 }
 
-class ArScenePlatformViewFactory(private val messenger: BinaryMessenger) :
-    PlatformViewFactory(StandardMessageCodec.INSTANCE) {
+class ArScenePlatformViewFactory(
+    private val activity: Activity?,
+    private val messenger: BinaryMessenger
+) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
 
     private var activeView: ArScenePlatformView? = null
 
     override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
         val creationParams = args as? Map<String?, Any?>
-        val view = ArScenePlatformView(context, viewId, creationParams)
+        val view = ArScenePlatformView(context, activity, viewId, creationParams)
         activeView = view
         ArBridge.activePlatformView = view
         return view
     }
 }
-

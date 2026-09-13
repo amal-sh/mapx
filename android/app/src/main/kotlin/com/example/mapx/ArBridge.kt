@@ -103,6 +103,7 @@ class ArBridge(private val flutterEngine: FlutterEngine) {
                     "startArSession" -> {
                         val floorId = call.argument<String>("floorId")
                         Log.d(TAG, "startArSession(floorId=$floorId)")
+                        activePlatformView?.resumeSession()
                         result.success(true)
                         eventSink?.success(
                             mapOf("type" to "trackingStateChanged", "state" to "normal")
@@ -127,6 +128,7 @@ class ArBridge(private val flutterEngine: FlutterEngine) {
                     "startMappingSession" -> {
                         val floorId = call.argument<String>("floorId")
                         Log.d(TAG, "startMappingSession(floorId=$floorId)")
+                        activePlatformView?.resumeSession()
                         result.success(true)
                         eventSink?.success(
                             mapOf("type" to "planeDetected", "planeCount" to 1)
@@ -161,6 +163,7 @@ class ArBridge(private val flutterEngine: FlutterEngine) {
 
                     "stopMappingSession" -> {
                         Log.d(TAG, "stopMappingSession()")
+                        activePlatformView?.pauseSession()
                         result.success(null)
                     }
 
@@ -181,6 +184,7 @@ class ArBridge(private val flutterEngine: FlutterEngine) {
                         Log.d(TAG, "stopArSession()")
                         isOcrStreamActive = false
                         activePathPoints = emptyList()
+                        activePlatformView?.pauseSession()
                         activePlatformView?.onClearPath()
                         result.success(null)
                     }

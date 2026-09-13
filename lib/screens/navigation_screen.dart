@@ -17,6 +17,7 @@ import '../models/floor.dart';
 import '../models/node.dart';
 import '../native/ar_bridge.dart';
 import '../native/camera_permission.dart';
+import '../widgets/mapping/native_ar_scene_view.dart';
 import '../widgets/navigation/ar_perspective_simulation_view.dart';
 import '../widgets/navigation/floor_map_view.dart';
 import '../widgets/navigation/mini_map_radar.dart';
@@ -95,6 +96,7 @@ class _NavigationScreenState extends State<NavigationScreen>
     _orientationTracker.start();
     _load();
     _subscribeToArEvents();
+    ArBridge.instance.startArSession(widget.destination.floorId).catchError((Object _) => false);
     _initCamera();
   }
 
@@ -135,7 +137,7 @@ class _NavigationScreenState extends State<NavigationScreen>
 
   Future<void> _initCamera() async {
     if (Platform.environment.containsKey('FLUTTER_TEST')) return;
-    // On Android devices, SceneView ARSceneView manages camera hardware directly.
+    // On Android devices, SceneView ARSceneView exclusively manages camera hardware.
     if (Platform.isAndroid) return;
     final granted = await ensureCameraPermission();
     if (!granted) return;
@@ -634,9 +636,7 @@ class _NavigationScreenState extends State<NavigationScreen>
             return Stack(
               fit: StackFit.expand,
               children: [
-                const AndroidView(
-                  viewType: 'mapx/ar_scene_view',
-                ),
+                const NativeArSceneView(),
                 ArPerspectiveSimulationView(
                   smoothedPoints: _smoothedPoints,
                   turnInstructions: _turnInstructions,

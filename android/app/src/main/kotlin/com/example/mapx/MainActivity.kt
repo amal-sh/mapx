@@ -12,7 +12,7 @@ class MainActivity : FlutterActivity() {
             .registry
             .registerViewFactory(
                 "mapx/ar_scene_view",
-                ArScenePlatformViewFactory(flutterEngine.dartExecutor.binaryMessenger)
+                ArScenePlatformViewFactory(this, flutterEngine.dartExecutor.binaryMessenger)
             )
     }
 }
