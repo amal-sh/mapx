@@ -5,11 +5,13 @@ import 'dart:math' as math;
 import 'package:camera/camera.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../data/map_repository.dart';
 import '../logic/bezier_smoother.dart';
 import '../logic/ocr_matcher.dart';
 import '../logic/pathfinder.dart';
+import '../logic/physical_orientation_tracker.dart';
 import '../models/edge.dart';
 import '../models/floor.dart';
 import '../models/node.dart';
@@ -72,7 +74,9 @@ class _NavigationScreenState extends State<NavigationScreen>
 
   late final AnimationController _arrowAnimationController;
 
+  final PhysicalOrientationTracker _orientationTracker = PhysicalOrientationTracker();
   Vector3? _userPosition;
+  final List<Position> _walkedBreadcrumbs = [];
   Timer? _simulationTimer;
   bool _isSimulatingWalk = false;
   bool _hasReachedDestination = false;
@@ -87,9 +91,30 @@ class _NavigationScreenState extends State<NavigationScreen>
     if (!Platform.environment.containsKey('FLUTTER_TEST')) {
       _arrowAnimationController.repeat();
     }
+    _orientationTracker.addListener(_onOrientationChanged);
+    _orientationTracker.start();
     _load();
     _subscribeToArEvents();
     _initCamera();
+  }
+
+  void _onOrientationChanged() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  void _calibrateForward() {
+    _orientationTracker.calibrateCurrentAsForward();
+    HapticFeedback.selectionClick();
+    if (mounted && !Platform.environment.containsKey('FLUTTER_TEST')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('🧭 Forward heading calibrated to current camera view!'),
+          duration: Duration(milliseconds: 1400),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   @override
@@ -97,6 +122,9 @@ class _NavigationScreenState extends State<NavigationScreen>
     _driftNoticeTimer?.cancel();
     _simulationTimer?.cancel();
     _arrowAnimationController.dispose();
+    _orientationTracker.removeListener(_onOrientationChanged);
+    _orientationTracker.stop();
+    _orientationTracker.dispose();
     _arSubscription?.cancel();
     _cameraController?.dispose();
     ArBridge.instance.stopOcrStream().catchError((Object _) => false);
@@ -107,6 +135,8 @@ class _NavigationScreenState extends State<NavigationScreen>
 
   Future<void> _initCamera() async {
     if (Platform.environment.containsKey('FLUTTER_TEST')) return;
+    final granted = await ensureCameraPermission();
+    if (!granted) return;
     try {
       final cameras = await availableCameras();
       if (cameras.isEmpty) return;
@@ -219,6 +249,23 @@ class _NavigationScreenState extends State<NavigationScreen>
   void _updateUserPosition(Vector3 newPos) {
     setState(() {
       _userPosition = newPos;
+
+      // Track breadcrumb dots dropped along the walked path
+      final newBreadcrumb = Position(x: newPos.x, y: 0.0, z: newPos.z);
+      if (_walkedBreadcrumbs.isEmpty) {
+        _walkedBreadcrumbs.add(newBreadcrumb);
+      } else {
+        final last = _walkedBreadcrumbs.last;
+        final dx = newBreadcrumb.x - last.x;
+        final dz = newBreadcrumb.z - last.z;
+        final dist = math.sqrt(dx * dx + dz * dz);
+        if (dist >= 0.35) {
+          _walkedBreadcrumbs.add(newBreadcrumb);
+          if (_walkedBreadcrumbs.length > 500) {
+            _walkedBreadcrumbs.removeAt(0);
+          }
+        }
+      }
 
       // Auto-advance turn instruction when user approaches within 1.8m of upcoming waypoint
       if (_currentInstruction != null && _currentInstructionIndex < _turnInstructions.length - 1) {
@@ -499,6 +546,7 @@ class _NavigationScreenState extends State<NavigationScreen>
       _turnInstructions = instructions;
       _currentInstructionIndex = 0;
       _userPosition = null;
+      _walkedBreadcrumbs.clear();
       _isSimulatingWalk = false;
       _hasReachedDestination = false;
       _simulationTimer?.cancel();
@@ -570,49 +618,65 @@ class _NavigationScreenState extends State<NavigationScreen>
   }
 
   Widget _buildArViewport() {
-    return AnimatedBuilder(
-      animation: _arrowAnimationController,
-      builder: (context, _) {
-        if (_cameraInitialized && _cameraController != null) {
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              FittedBox(
-                fit: BoxFit.cover,
-                child: SizedBox(
-                  width: _cameraController!.value.previewSize?.height ?? MediaQuery.of(context).size.width,
-                  height: _cameraController!.value.previewSize?.width ?? MediaQuery.of(context).size.height,
-                  child: CameraPreview(_cameraController!),
-                ),
-              ),
-              ArPerspectiveSimulationView(
-                smoothedPoints: _smoothedPoints,
-                turnInstructions: _turnInstructions,
-                currentInstructionIndex: _currentInstructionIndex,
-                destination: widget.destination,
-                startNode: _selectedStartNode,
-                animationProgress: _arrowAnimationController.value,
-                userPosition: _userPosition,
-                isOverlay: true,
-                hasReachedDestination: _hasReachedDestination,
-              ),
-            ],
-          );
-        }
-
-        // High-fidelity AR Simulation View for desktop/test/preview
-        return ArPerspectiveSimulationView(
-          smoothedPoints: _smoothedPoints,
-          turnInstructions: _turnInstructions,
-          currentInstructionIndex: _currentInstructionIndex,
-          destination: widget.destination,
-          startNode: _selectedStartNode,
-          animationProgress: _arrowAnimationController.value,
-          userPosition: _userPosition,
-          isOverlay: false,
-          hasReachedDestination: _hasReachedDestination,
-        );
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onHorizontalDragUpdate: (details) {
+        setState(() {
+          _orientationTracker.rotateHeading(details.primaryDelta! * 0.006);
+        });
       },
+      child: AnimatedBuilder(
+        animation: _arrowAnimationController,
+        builder: (context, _) {
+          if (_cameraInitialized && _cameraController != null) {
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                FittedBox(
+                  fit: BoxFit.cover,
+                  child: SizedBox(
+                    width: _cameraController!.value.previewSize?.height ?? MediaQuery.of(context).size.width,
+                    height: _cameraController!.value.previewSize?.width ?? MediaQuery.of(context).size.height,
+                    child: CameraPreview(_cameraController!),
+                  ),
+                ),
+                ArPerspectiveSimulationView(
+                  smoothedPoints: _smoothedPoints,
+                  turnInstructions: _turnInstructions,
+                  currentInstructionIndex: _currentInstructionIndex,
+                  destination: widget.destination,
+                  startNode: _selectedStartNode,
+                  animationProgress: _arrowAnimationController.value,
+                  userPosition: _userPosition,
+                  cameraHeadingRadians: _orientationTracker.headingRadians,
+                  cameraPitchRadians: _orientationTracker.pitchRadians,
+                  cameraRollRadians: _orientationTracker.rollRadians,
+                  isOverlay: true,
+                  hasReachedDestination: _hasReachedDestination,
+                  walkedBreadcrumbs: _walkedBreadcrumbs,
+                ),
+              ],
+            );
+          }
+
+          // High-fidelity AR Simulation View for desktop/test/preview
+          return ArPerspectiveSimulationView(
+            smoothedPoints: _smoothedPoints,
+            turnInstructions: _turnInstructions,
+            currentInstructionIndex: _currentInstructionIndex,
+            destination: widget.destination,
+            startNode: _selectedStartNode,
+            animationProgress: _arrowAnimationController.value,
+            userPosition: _userPosition,
+            cameraHeadingRadians: _orientationTracker.headingRadians,
+            cameraPitchRadians: _orientationTracker.pitchRadians,
+            cameraRollRadians: _orientationTracker.rollRadians,
+            isOverlay: false,
+            hasReachedDestination: _hasReachedDestination,
+            walkedBreadcrumbs: _walkedBreadcrumbs,
+          );
+        },
+      ),
     );
   }
 
@@ -638,6 +702,7 @@ class _NavigationScreenState extends State<NavigationScreen>
                           destination: widget.destination,
                           startNode: _selectedStartNode,
                           userPosition: _userPosition,
+                          walkedBreadcrumbs: _walkedBreadcrumbs,
                         )
                       : _buildArViewport(),
                 ),
@@ -787,42 +852,76 @@ class _NavigationScreenState extends State<NavigationScreen>
                         ],
                       ),
                       const SizedBox(height: 6),
-                      // Tracking Status Indicator Pill
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.75),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.white12),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 7,
-                              height: 7,
+                      // Tracking Status Indicator Pill & Compass Heading Pill
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.75),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.white12),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 7,
+                                  height: 7,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: (_arSessionActive && _trackingState == TrackingState.normal)
+                                        ? Colors.white
+                                        : Colors.white60,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  !_arSessionActive
+                                      ? 'AR Initializing...'
+                                      : (_trackingState == TrackingState.normal
+                                          ? 'Depth Occlusion ON'
+                                          : 'Tracking Limited'),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          // Live Compass Pill (Tap to calibrate forward)
+                          InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: _calibrateForward,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                               decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: (_arSessionActive && _trackingState == TrackingState.normal)
-                                    ? Colors.white
-                                    : Colors.white60,
+                                color: Colors.black.withValues(alpha: 0.75),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.5)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(CupertinoIcons.compass, color: Color(0xFF00E5FF), size: 12),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '${_orientationTracker.headingDegrees.round()}°',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            const SizedBox(width: 6),
-                            Text(
-                              !_arSessionActive
-                                  ? 'AR Initializing...'
-                                  : (_trackingState == TrackingState.normal
-                                      ? 'Depth Occlusion ON'
-                                      : 'Tracking Limited'),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -907,6 +1006,7 @@ class _NavigationScreenState extends State<NavigationScreen>
                       turnInstructions: _turnInstructions,
                       currentInstructionIndex: _currentInstructionIndex,
                       userPosition: _userPosition,
+                      walkedBreadcrumbs: _walkedBreadcrumbs,
                       onTap: () => setState(() => _show2dFloorMap = true),
                     ),
                   ),

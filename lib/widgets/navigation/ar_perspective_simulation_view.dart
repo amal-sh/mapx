@@ -19,8 +19,12 @@ class ArPerspectiveSimulationView extends StatelessWidget {
   final MapNode? startNode;
   final double animationProgress;
   final Vector3? userPosition;
+  final double? cameraHeadingRadians;
+  final double? cameraPitchRadians;
+  final double? cameraRollRadians;
   final bool isOverlay;
   final bool hasReachedDestination;
+  final List<Position>? walkedBreadcrumbs;
 
   const ArPerspectiveSimulationView({
     super.key,
@@ -31,8 +35,12 @@ class ArPerspectiveSimulationView extends StatelessWidget {
     this.startNode,
     required this.animationProgress,
     this.userPosition,
+    this.cameraHeadingRadians,
+    this.cameraPitchRadians,
+    this.cameraRollRadians,
     this.isOverlay = false,
     this.hasReachedDestination = false,
+    this.walkedBreadcrumbs,
   });
 
   @override
@@ -48,8 +56,12 @@ class ArPerspectiveSimulationView extends StatelessWidget {
           destination: destination,
           startNode: startNode,
           userPosition: userPosition,
+          cameraHeadingRadians: cameraHeadingRadians,
+          cameraPitchRadians: cameraPitchRadians,
+          cameraRollRadians: cameraRollRadians,
           isOverlay: isOverlay,
           hasReachedDestination: hasReachedDestination,
+          walkedBreadcrumbs: walkedBreadcrumbs,
         ),
         child: isOverlay
             ? const SizedBox.expand()
@@ -100,8 +112,12 @@ class ArPerspectivePainter extends CustomPainter {
   final MapNode destination;
   final MapNode? startNode;
   final Vector3? userPosition;
+  final double? cameraHeadingRadians;
+  final double? cameraPitchRadians;
+  final double? cameraRollRadians;
   final bool isOverlay;
   final bool hasReachedDestination;
+  final List<Position>? walkedBreadcrumbs;
 
   ArPerspectivePainter({
     required this.points,
@@ -111,19 +127,32 @@ class ArPerspectivePainter extends CustomPainter {
     required this.destination,
     this.startNode,
     this.userPosition,
+    this.cameraHeadingRadians,
+    this.cameraPitchRadians,
+    this.cameraRollRadians,
     this.isOverlay = false,
     this.hasReachedDestination = false,
+    this.walkedBreadcrumbs,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     final width = size.width;
     final height = size.height;
-
-    // Horizon line for 3D corridor perspective
-    final horizonY = height * 0.35;
     final originX = width * 0.5;
-    final originY = height * 0.82;
+    final originY = height * 0.5;
+
+    final pitch = cameraPitchRadians ?? -0.45;
+    final roll = cameraRollRadians ?? 0.0;
+    const double cameraHeight = 1.35;
+
+    // True physical camera focal length for portrait camera viewfinder:
+    const fovV = 60.0 * math.pi / 180.0;
+    final focalLength = (height * 0.5) / math.tan(fovV * 0.5);
+
+    // Dynamic horizon line based on camera pitch
+    final horizonY = originY - math.tan(pitch) * focalLength;
+    final groundBaselineY = height * 0.82;
 
     // 1. Draw floor grid when in standalone simulation mode
     if (!isOverlay) {
@@ -132,8 +161,8 @@ class ArPerspectivePainter extends CustomPainter {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [Color(0xFF070B14), Color(0xFF0F172A)],
-        ).createShader(Rect.fromLTWH(0, horizonY, width, height - horizonY));
-      canvas.drawRect(Rect.fromLTWH(0, horizonY, width, height - horizonY), floorGradient);
+        ).createShader(Rect.fromLTWH(0, horizonY.clamp(0.0, height), width, height));
+      canvas.drawRect(Rect.fromLTWH(0, horizonY.clamp(0.0, height), width, height), floorGradient);
 
       final horizonPaint = Paint()
         ..color = Colors.cyanAccent.withValues(alpha: 0.25)
@@ -178,41 +207,69 @@ class ArPerspectivePainter extends CustomPainter {
       }
     }
 
-    // Determine forward heading vector F
-    double fx = 0.0;
-    double fz = 1.0;
-    if (points.isNotEmpty && startIdx < points.length - 1) {
+    // Determine camera heading in world space
+    final double heading;
+    if (cameraHeadingRadians != null) {
+      heading = cameraHeadingRadians!;
+    } else if (points.isNotEmpty && startIdx < points.length - 1) {
       final lookAhead = math.min(startIdx + 4, points.length - 1);
       final pNext = points[lookAhead].position;
       final dx = pNext.x - points[startIdx].position.x;
       final dz = pNext.z - points[startIdx].position.z;
-      final len = math.sqrt(dx * dx + dz * dz);
-      if (len > 0.001) {
-        fx = dx / len;
-        fz = dz / len;
-      }
+      heading = math.atan2(dx, dz);
+    } else {
+      heading = 0.0;
     }
-    // Right vector R (perpendicular to F, pointing right)
-    final rx = fz;
-    final rz = -fx;
+
+    final cosH = math.cos(heading);
+    final sinH = math.sin(heading);
+    final cosP = math.cos(pitch);
+    final sinP = math.sin(pitch);
+    final cosR = math.cos(roll);
+    final sinR = math.sin(roll);
+
+    // Forward vector (through camera optical axis)
+    final fx = sinH * cosP;
+    final fy = sinP;
+    final fz = cosH * cosP;
+
+    // Unrolled Right vector (horizontal right)
+    final r0x = cosH;
+    final r0y = 0.0;
+    final r0z = -sinH;
+
+    // Unrolled Up vector (perpendicular to F and r0)
+    final u0x = -sinH * sinP;
+    final u0y = cosP;
+    final u0z = -cosH * sinP;
+
+    // Camera Right vector (X_c) incorporating device wrist roll
+    final rx = r0x * cosR + u0x * sinR;
+    final ry = r0y * cosR + u0y * sinR;
+    final rz = r0z * cosR + u0z * sinR;
+
+    // Camera Up vector (Y_c) incorporating device wrist roll
+    final ux = -r0x * sinR + u0x * cosR;
+    final uy = -r0y * sinR + u0y * cosR;
+    final uz = -r0z * sinR + u0z * cosR;
 
     // Perspective projection function from 3D world meters into 2D screen coordinates
-    // Returns null if point is behind the camera viewpoint (zCam < -0.35m)
+    // Returns null if point is behind the camera viewpoint (zCam <= 0.15m)
     Offset? project(Vector3 pos) {
       final dx = pos.x - anchorPos.x;
+      final dy = pos.y - cameraHeight;
       final dz = pos.z - anchorPos.z;
 
-      final zCam = dx * fx + dz * fz;
-      final xCam = dx * rx + dz * rz;
+      final zCam = dx * fx + dy * fy + dz * fz;
+      if (zCam < 0.15) return null;
 
-      if (zCam < -0.35) return null;
+      final xCam = dx * rx + dy * ry + dz * rz;
+      final yCam = dx * ux + dy * uy + dz * uz;
 
-      final s = 4.5 / (4.5 + math.max(0.0, zCam));
-      final sy = horizonY + (originY - horizonY) * s;
-      final lateralScale = width * 0.22;
-      final sx = originX + (xCam * lateralScale) * s;
+      final sx = originX + (xCam / zCam) * focalLength;
+      final sy = originY - (yCam / zCam) * focalLength;
 
-      return Offset(sx.clamp(-width * 1.5, width * 2.5), sy);
+      return Offset(sx, sy);
     }
 
     final visiblePoints = points.isNotEmpty ? points.sublist(startIdx) : <SmoothedPathPoint>[];
@@ -220,6 +277,71 @@ class ArPerspectivePainter extends CustomPainter {
     for (final pt in visiblePoints) {
       final proj = project(pt.position);
       if (proj != null) screenOffsets.add(proj);
+    }
+
+    // 2.5 Draw 3D Breadcrumb Footsteps on Floor (Dropped dots along walked path)
+    if (walkedBreadcrumbs != null && walkedBreadcrumbs!.isNotEmpty) {
+      final trailGlow = Paint()
+        ..color = const Color(0xFF00E5FF).withValues(alpha: 0.28)
+        ..strokeWidth = 5.0
+        ..strokeCap = StrokeCap.round
+        ..style = PaintingStyle.stroke;
+
+      final trailLine = Paint()
+        ..color = const Color(0xFF38BDF8).withValues(alpha: 0.75)
+        ..strokeWidth = 2.0
+        ..strokeCap = StrokeCap.round
+        ..style = PaintingStyle.stroke;
+
+      final outerRingFill = Paint()
+        ..color = const Color(0xFF00E5FF).withValues(alpha: 0.22)
+        ..style = PaintingStyle.fill;
+
+      final outerRingStroke = Paint()
+        ..color = const Color(0xFF38BDF8)
+        ..style = PaintingStyle.stroke;
+
+      final coreDot = Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.fill;
+
+      Offset? prevOffset;
+      for (int i = 0; i < walkedBreadcrumbs!.length; i++) {
+        final b = walkedBreadcrumbs![i];
+        final p = project(Vector3(b.x, 0.0, b.z));
+        if (p == null) {
+          prevOffset = null;
+          continue;
+        }
+
+        // Draw trail connecting consecutive footsteps
+        if (prevOffset != null) {
+          canvas.drawLine(prevOffset, p, trailGlow);
+          canvas.drawLine(prevOffset, p, trailLine);
+        }
+        prevOffset = p;
+
+        final depthRatio = ((p.dy - horizonY) / (groundBaselineY - horizonY)).clamp(0.2, 1.25);
+        final baseR = 5.0 * depthRatio;
+
+        // Outer translucent floor ring
+        canvas.drawCircle(p, baseR * 1.8, outerRingFill);
+        outerRingStroke.strokeWidth = 1.2 * depthRatio;
+        canvas.drawCircle(p, baseR * 1.8, outerRingStroke);
+
+        // Core bright dot
+        canvas.drawCircle(p, baseR * 0.9, coreDot);
+
+        // Pulsing glow on the latest footstep
+        if (i == walkedBreadcrumbs!.length - 1) {
+          final pulseR = (baseR * 1.8) + (6.0 * depthRatio * animationProgress);
+          final pulsePaint = Paint()
+            ..color = const Color(0xFF00E5FF).withValues(alpha: (0.6 * (1.0 - animationProgress)).clamp(0.0, 0.6))
+            ..strokeWidth = 1.5 * depthRatio
+            ..style = PaintingStyle.stroke;
+          canvas.drawCircle(p, pulseR, pulsePaint);
+        }
+      }
     }
 
     // 3. Draw smoothed path glow line with depth-tapered width
@@ -428,7 +550,11 @@ class ArPerspectivePainter extends CustomPainter {
     // 7. Draw 3D AR Destination Marker & Star Pin Icon
     final destVec = Vector3(destination.position.x, destination.position.y, destination.position.z);
     final destPos = project(destVec);
-    if (destPos != null && destPos.dy >= horizonY - 40 && destPos.dy <= height + 60) {
+    if (destPos != null &&
+        destPos.dx >= -40 &&
+        destPos.dx <= width + 40 &&
+        destPos.dy >= horizonY - 40 &&
+        destPos.dy <= height + 60) {
       final depthRatio = ((destPos.dy - horizonY) / (originY - horizonY)).clamp(0.25, 1.25);
       _drawDestinationMarker(
         canvas: canvas,
@@ -437,6 +563,29 @@ class ArPerspectivePainter extends CustomPainter {
         scale: depthRatio,
         hasReached: hasReachedDestination,
       );
+    } else {
+      // Off-screen destination cue: user turned camera away from destination
+      final dxDest = destination.position.x - anchorPos.x;
+      final dzDest = destination.position.z - anchorPos.z;
+      final destDist = math.sqrt(dxDest * dxDest + dzDest * dzDest);
+      if (destDist > 0.4) {
+        final bearing = math.atan2(dxDest, dzDest);
+        var relAngle = bearing - heading;
+        while (relAngle < -math.pi) {
+          relAngle += 2 * math.pi;
+        }
+        while (relAngle > math.pi) {
+          relAngle -= 2 * math.pi;
+        }
+        _drawOffScreenDestCue(
+          canvas: canvas,
+          size: size,
+          angleDelta: relAngle,
+          distance: destDist,
+          label: destination.label,
+          hasReached: hasReachedDestination,
+        );
+      }
     }
   }
 
@@ -1336,6 +1485,74 @@ class ArPerspectivePainter extends CustomPainter {
     textPainter.paint(
       canvas,
       Offset(pos.dx - textPainter.width / 2, badgeY - textPainter.height / 2),
+    );
+  }
+
+  /// Draws a sleek, glowing AR edge indicator when the destination is outside the camera view.
+  void _drawOffScreenDestCue({
+    required Canvas canvas,
+    required Size size,
+    required double angleDelta,
+    required double distance,
+    required String label,
+    required bool hasReached,
+  }) {
+    final isLeft = angleDelta < 0;
+    final edgeY = size.height * 0.40;
+    final destColor = hasReached ? const Color(0xFF10B981) : const Color(0xFFEF4444);
+
+    final textSpan = TextSpan(
+      children: [
+        TextSpan(text: isLeft ? '◀  ' : ''),
+        TextSpan(
+          text: '$label  ',
+          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 12),
+        ),
+        TextSpan(
+          text: '${distance.toStringAsFixed(1)}m',
+          style: TextStyle(color: destColor, fontSize: 11, fontWeight: FontWeight.w700),
+        ),
+        TextSpan(text: isLeft ? '' : '  ▶'),
+      ],
+    );
+
+    final textPainter = TextPainter(
+      text: textSpan,
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    final pillWidth = textPainter.width + 18.0;
+    final pillHeight = 28.0;
+    final centerX = isLeft ? pillWidth / 2 + 12.0 : size.width - (pillWidth / 2 + 12.0);
+    final rect = RRect.fromRectAndRadius(
+      Rect.fromCenter(
+        center: Offset(centerX, edgeY),
+        width: pillWidth,
+        height: pillHeight,
+      ),
+      const Radius.circular(14),
+    );
+
+    canvas.drawRRect(
+      rect,
+      Paint()
+        ..color = const Color(0xFF0F172A).withValues(alpha: 0.90)
+        ..style = PaintingStyle.fill,
+    );
+    canvas.drawRRect(
+      rect,
+      Paint()
+        ..color = destColor.withValues(alpha: 0.8)
+        ..strokeWidth = 1.4
+        ..style = PaintingStyle.stroke,
+    );
+
+    textPainter.paint(
+      canvas,
+      Offset(
+        rect.center.dx - textPainter.width / 2,
+        rect.center.dy - textPainter.height / 2,
+      ),
     );
   }
 

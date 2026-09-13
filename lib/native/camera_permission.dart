@@ -19,3 +19,17 @@ Future<bool> ensureCameraPermission() async {
     return false;
   }
 }
+
+/// Requests runtime ACTIVITY_RECOGNITION permission (required on Android 10+ / API 29+
+/// for hardware step counting via pedometer).
+Future<bool> ensureActivityRecognitionPermission() async {
+  if (Platform.environment.containsKey('FLUTTER_TEST')) {
+    return true;
+  }
+  try {
+    final status = await Permission.activityRecognition.request();
+    return status.isGranted;
+  } catch (_) {
+    return false;
+  }
+}

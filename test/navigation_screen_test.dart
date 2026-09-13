@@ -9,6 +9,8 @@ import 'package:mapx/models/floor.dart';
 import 'package:mapx/models/node.dart';
 import 'package:mapx/native/ar_bridge.dart';
 import 'package:mapx/screens/navigation_screen.dart';
+import 'package:mapx/widgets/navigation/ar_perspective_simulation_view.dart';
+import 'package:mapx/widgets/navigation/floor_map_view.dart';
 
 void main() {
   group('NavigationScreen AR & Bezier Guidance Tests', () {
@@ -367,6 +369,85 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('You Have Reached Your Destination!'), findsNothing);
+    });
+
+    testWidgets('anchors 3D AR navigation elements to physical world with camera rotation and compass HUD', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NavigationScreen(
+            repository: repo,
+            floor: floor,
+            destination: room101,
+            startNode: entrance,
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      // 1. Initial compass heading pill is displayed at 0°
+      expect(find.text('0°'), findsOneWidget);
+
+      // 2. Drag horizontally on the AR viewport to simulate turning the camera away
+      await tester.drag(find.byType(GestureDetector).first, const Offset(300, 0));
+      await tester.pumpAndSettle();
+
+      // Heading should now be rotated away from 0°
+      expect(find.text('0°'), findsNothing);
+
+      // 3. Tap live compass pill to calibrate current heading as forward (0°)
+      await tester.tap(find.textContaining('°'));
+      await tester.pumpAndSettle();
+
+      // Heading should be recalibrated back to 0°
+      expect(find.text('0°'), findsOneWidget);
+    });
+
+    testWidgets('drops and displays breadcrumb dots along the path tracked while walking', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NavigationScreen(
+            repository: repo,
+            floor: floor,
+            destination: room101,
+            startNode: entrance,
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      // Initially no breadcrumbs or empty
+      var arView = tester.widget<ArPerspectiveSimulationView>(find.byType(ArPerspectiveSimulationView));
+      expect(arView.walkedBreadcrumbs?.isEmpty ?? true, isTrue);
+
+      // Simulate footsteps / user pose movement along the corridor
+      ArBridge.instance.injectEvent(UserPoseEvent(x: 0.0, y: 0.0, z: 1.0));
+      await tester.pumpAndSettle();
+
+      ArBridge.instance.injectEvent(UserPoseEvent(x: 0.0, y: 0.0, z: 2.0));
+      await tester.pumpAndSettle();
+
+      ArBridge.instance.injectEvent(UserPoseEvent(x: 0.0, y: 0.0, z: 3.0));
+      await tester.pumpAndSettle();
+
+      // Verify breadcrumbs were dropped along the walked path in the 3D AR view
+      arView = tester.widget<ArPerspectiveSimulationView>(find.byType(ArPerspectiveSimulationView));
+      expect(arView.walkedBreadcrumbs, isNotNull);
+      expect(arView.walkedBreadcrumbs!.length, 3);
+      expect(arView.walkedBreadcrumbs![0].z, 1.0);
+      expect(arView.walkedBreadcrumbs![1].z, 2.0);
+      expect(arView.walkedBreadcrumbs![2].z, 3.0);
+
+      // Switch to 2D Floor Map and verify walked breadcrumbs are also present
+      final mapToggle = find.byTooltip('Switch to 2D Floor Map');
+      expect(mapToggle, findsOneWidget);
+      await tester.tap(mapToggle);
+      await tester.pumpAndSettle();
+
+      final floorMap = tester.widget<FloorMapView>(find.byType(FloorMapView));
+      expect(floorMap.walkedBreadcrumbs, isNotNull);
+      expect(floorMap.walkedBreadcrumbs!.length, 3);
     });
   });
 }

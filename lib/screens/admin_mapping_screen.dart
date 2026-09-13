@@ -1,12 +1,17 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:pedometer/pedometer.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 
 import '../data/map_repository.dart';
 import '../logic/mapping_quality_advisor.dart';
+import '../logic/physical_orientation_tracker.dart';
 import '../logic/spatial_odometry_tracker.dart';
 import '../models/building.dart';
 import '../models/edge.dart';
@@ -14,11 +19,11 @@ import '../models/floor.dart';
 import '../models/node.dart';
 import '../native/ar_bridge.dart';
 import '../native/camera_permission.dart';
-import '../widgets/mapping/grid_painter.dart';
+import '../widgets/mapping/ar_mapping_perspective_painter.dart';
 import '../widgets/mapping/mapping_controls_bar.dart';
 import '../widgets/mapping/mapping_inspector_sheet.dart';
+import '../widgets/mapping/mapping_mini_map.dart';
 import '../widgets/mapping/node_form_dialog.dart';
-import '../widgets/mapping/walk_track_button.dart';
 
 /// In-app AR Mapping tool for building administrators.
 ///
@@ -48,11 +53,13 @@ class AdminMappingScreen extends StatefulWidget {
   State<AdminMappingScreen> createState() => _AdminMappingScreenState();
 }
 
-class _AdminMappingScreenState extends State<AdminMappingScreen> {
+class _AdminMappingScreenState extends State<AdminMappingScreen>
+    with SingleTickerProviderStateMixin {
   final List<MapNode> _nodes = [];
   final List<MapEdge> _edges = [];
 
   final SpatialOdometryTracker _odometryTracker = SpatialOdometryTracker();
+  final PhysicalOrientationTracker _orientationTracker = PhysicalOrientationTracker();
   final MappingQualityAdvisor _advisor = MappingQualityAdvisor();
 
   bool _loading = true;
@@ -60,10 +67,17 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
   bool _breadcrumbMode = true;
   MapNode? _lastPlacedNode;
   MapNode? _linkSourceNode;
+  MapNode? _selectedNode;
   bool _isLinkingMode = false;
   // ignore: unused_field
   int _planeCount = 0;
   StreamSubscription<ArEvent>? _arSubscription;
+  StreamSubscription<StepCount>? _stepCountSubscription;
+  StreamSubscription<UserAccelerometerEvent>? _accelSubscription;
+  int? _lastCumulativeStepCount;
+  DateTime _lastStepTime = DateTime.now();
+  static const double _stepThreshold = 1.35; // m/s^2 user-acceleration spike on footstep impact
+  static const int _stepDebounceMs = 320;
 
   CameraController? _cameraController;
   bool _cameraInitialized = false;
@@ -74,25 +88,68 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
   AdvisorAlert? _currentAlert;
   Timer? _advisorCheckTimer;
 
-  bool _isHoldingToRecord = false;
-  bool _isHandsFreeLocked = false;
-  bool get _isRecordingActive => _isHoldingToRecord || _isHandsFreeLocked;
+  bool _isTrackingActive = true;
+
+  late final AnimationController _pulseAnimationController;
+  double _targetDistanceAhead = 2.0;
+  ArMappingPerspectivePainter? _lastPainter;
+
+  Position get _targetFloorPosition => _odometryTracker.calculateNodePosition(
+        forwardOffsetMeters: _targetDistanceAhead,
+      );
 
   @override
   void initState() {
     super.initState();
-    _odometryTracker.pauseRecording();
+    _pulseAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    );
+    if (!Platform.environment.containsKey('FLUTTER_TEST')) {
+      _pulseAnimationController.repeat();
+    }
+    _odometryTracker.startRecording(); // Active by default: walk freely!
+    _orientationTracker.addListener(_onOrientationChanged);
+    _orientationTracker.start();
     _loadExistingGraph();
     _initAr();
+    _initSensors();
     _initCamera();
-    _advisorCheckTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+    if (!Platform.environment.containsKey('FLUTTER_TEST')) {
+      _advisorCheckTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+        _updateAdvisorAlert();
+      });
+    }
+  }
+
+  void _onOrientationChanged() {
+    if (!mounted) return;
+    setState(() {
+      _odometryTracker.setHeading(_orientationTracker.headingRadians);
       _updateAdvisorAlert();
     });
+  }
+
+  void _calibrateForward() {
+    _orientationTracker.calibrateCurrentAsForward();
+    _odometryTracker.setHeading(_orientationTracker.headingRadians);
+    HapticFeedback.selectionClick();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('🧭 Forward heading calibrated to current camera view!'),
+        duration: Duration(milliseconds: 1400),
+      ),
+    );
   }
 
   @override
   void dispose() {
     _advisorCheckTimer?.cancel();
+    _orientationTracker.removeListener(_onOrientationChanged);
+    _orientationTracker.stop();
+    _pulseAnimationController.dispose();
+    _accelSubscription?.cancel();
+    _stepCountSubscription?.cancel();
     _arSubscription?.cancel();
     if (_isStreamingImages && _cameraController != null) {
       _cameraController!.stopImageStream().catchError((Object _) {});
@@ -104,6 +161,8 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
 
   Future<void> _initCamera() async {
     if (Platform.environment.containsKey('FLUTTER_TEST')) return;
+    final granted = await ensureCameraPermission();
+    if (!granted) return;
     try {
       final cameras = await availableCameras();
       if (cameras.isEmpty) return;
@@ -212,6 +271,96 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
     });
   }
 
+  void _initSensors() {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) return;
+
+    // 1. Instant real-time Accelerometer step detection (Zero permissions, 50Hz immediate hardware stream)
+    try {
+      _accelSubscription = userAccelerometerEventStream().listen(
+        _onUserAccelerometer,
+        onError: (_) {},
+        cancelOnError: false,
+      );
+    } catch (_) {}
+
+    // 2. Hardware pedometer stream as complementary sensor
+    _initPedometer();
+  }
+
+  void _onUserAccelerometer(UserAccelerometerEvent event) {
+    if (!_isTrackingActive) return;
+    // Magnitude of user linear acceleration (gravity isolated)
+    final mag = math.sqrt(event.x * event.x + event.y * event.y + event.z * event.z);
+    final now = DateTime.now();
+    if (mag >= _stepThreshold &&
+        now.difference(_lastStepTime).inMilliseconds > _stepDebounceMs) {
+      _lastStepTime = now;
+      if (mounted) {
+        setState(() {
+          _odometryTracker.recordStep();
+          _updateAdvisorAlert();
+        });
+      }
+    }
+  }
+
+  void _toggleTracking() {
+    setState(() {
+      _isTrackingActive = !_isTrackingActive;
+      if (_isTrackingActive) {
+        _odometryTracker.startRecording();
+      } else {
+        _odometryTracker.pauseRecording();
+      }
+      _updateAdvisorAlert();
+    });
+    HapticFeedback.selectionClick();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _isTrackingActive
+              ? '▶ AUTO-TRACKING ACTIVE: Footsteps tracked automatically!'
+              : '⏸ TRACKING PAUSED: Walk tracking paused.',
+        ),
+        duration: const Duration(milliseconds: 1400),
+      ),
+    );
+  }
+
+  Future<void> _initPedometer() async {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) return;
+
+    final granted = await ensureActivityRecognitionPermission();
+    if (!granted) return;
+
+    try {
+      _stepCountSubscription = Pedometer.stepCountStream.listen(
+        _onStepCount,
+        onError: (_) {},
+        cancelOnError: false,
+      );
+    } catch (_) {}
+  }
+
+  void _onStepCount(StepCount event) {
+    if (!mounted) return;
+    final current = event.steps;
+    if (_lastCumulativeStepCount != null) {
+      final delta = current - _lastCumulativeStepCount!;
+      if (delta > 0 && delta < 50 && _isTrackingActive) {
+        if (DateTime.now().difference(_lastStepTime).inMilliseconds > 600) {
+          setState(() {
+            for (int i = 0; i < delta; i++) {
+              _odometryTracker.recordStep();
+            }
+            _updateAdvisorAlert();
+          });
+        }
+      }
+    }
+    _lastCumulativeStepCount = current;
+  }
+
   void _updateAdvisorAlert() {
     if (!mounted) return;
     final loopCandidate = _odometryTracker.checkLoopClosureCandidate(
@@ -266,27 +415,180 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
     );
   }
 
+  void _turnLeft90() {
+    setState(() {
+      _orientationTracker.rotateHeading(-math.pi / 2);
+      _odometryTracker.setHeading(_orientationTracker.headingRadians);
+      _updateAdvisorAlert();
+    });
+  }
+
+  void _turnRight90() {
+    setState(() {
+      _orientationTracker.rotateHeading(math.pi / 2);
+      _odometryTracker.setHeading(_orientationTracker.headingRadians);
+      _updateAdvisorAlert();
+    });
+  }
+
+  void _turnAround180() {
+    setState(() {
+      _orientationTracker.rotateHeading(math.pi);
+      _odometryTracker.setHeading(_orientationTracker.headingRadians);
+      _updateAdvisorAlert();
+    });
+  }
+
   Future<void> _handleViewportTap(TapUpDetails details, BoxConstraints constraints) async {
-    if (_isLinkingMode) return;
-
-    final screenX = details.localPosition.dx / constraints.maxWidth;
-    final screenY = details.localPosition.dy / constraints.maxHeight;
-
-    final hit = await ArBridge.instance.hitTest(
-      screenX,
-      screenY,
-      currentX: _odometryTracker.currentPosition.x,
-      currentZ: _odometryTracker.currentPosition.z,
+    // 1. Check if user tapped directly on an existing 3D node
+    final tappedNode = _lastPainter?.hitTestNode(
+      details.localPosition,
+      Size(constraints.maxWidth, constraints.maxHeight),
     );
 
-    final position = hit != null
-        ? Position(x: hit.x, y: hit.y, z: hit.z)
-        : _odometryTracker.calculateNodePosition(
-            forwardOffsetMeters: (screenY * 2.5).clamp(0.5, 4.0),
-          );
+    if (tappedNode != null) {
+      if (_isLinkingMode) {
+        _startManualLink(tappedNode);
+      } else {
+        setState(() => _selectedNode = tappedNode);
+        _showNodeQuickActionSheet(tappedNode);
+      }
+      return;
+    }
 
-    if (!mounted) return;
-    _showAddNodeDialog(position);
+    if (_isLinkingMode) return;
+
+    // 2. Tapped on floor plane: map screenY to depth distance ahead
+    final screenY = details.localPosition.dy / constraints.maxHeight;
+    if (screenY < 0.36) return;
+
+    final depthFactor = ((0.85 - screenY) / 0.45).clamp(0.0, 1.0);
+    final distanceMeters = double.parse((0.6 + depthFactor * 3.8).toStringAsFixed(1));
+
+    setState(() {
+      _targetDistanceAhead = distanceMeters;
+      _selectedNode = null;
+    });
+
+    final targetPos = _odometryTracker.calculateNodePosition(
+      forwardOffsetMeters: distanceMeters,
+    );
+
+    _showAddNodeDialog(targetPos);
+  }
+
+  void _showNodeQuickActionSheet(MapNode node) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF0F172A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        final dist = _odometryTracker.currentPosition.distanceTo(node.position);
+        final connectedEdges = _edges
+            .where((e) => e.fromNodeId == node.id || e.toNodeId == node.id)
+            .toList();
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E293B),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: const Color(0xFF38BDF8), width: 1.5),
+                    ),
+                    child: const Icon(CupertinoIcons.placemark_fill,
+                        color: Color(0xFF38BDF8), size: 22),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          node.label,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          '${node.type.name.toUpperCase()} • ${dist.toStringAsFixed(1)}m away • ${connectedEdges.length} connections',
+                          style: const TextStyle(color: Colors.white60, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(CupertinoIcons.xmark_circle_fill,
+                        color: Colors.white38),
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF2563EB),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      icon: const Icon(CupertinoIcons.link, size: 18),
+                      label: const Text('Connect Path',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        setState(() {
+                          _isLinkingMode = true;
+                          _linkSourceNode = node;
+                        });
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                              content: Text(
+                                  'Selected "${node.label}". Now tap second node to link.')),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor:
+                          const Color(0xFFDC2626).withValues(alpha: 0.2),
+                      foregroundColor: const Color(0xFFEF4444),
+                      side: const BorderSide(color: Color(0xFFDC2626)),
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 12, horizontal: 16),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(CupertinoIcons.trash, size: 18),
+                    label: const Text('Delete'),
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      _deleteNode(node);
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   void _showAddNodeDialog(Position position) {
@@ -295,9 +597,7 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
       position: position,
       previousNodeLabel: _lastPlacedNode?.label,
       previousNodePosition: _lastPlacedNode?.position,
-      initialDistance: _lastPlacedNode != null
-          ? _lastPlacedNode!.position.distanceTo(position)
-          : null,
+      initialDistance: _lastPlacedNode?.position.distanceTo(position),
       suggestedLabel: _nodes.isEmpty ? 'Entrance' : 'Room ${101 + _nodes.length}',
       initialType: _nodes.isEmpty ? NodeType.junction : NodeType.room,
       onConfirm: (label, type, confirmedPosition) {
@@ -696,43 +996,40 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                             Container(color: const Color(0xFF09090B)),
 
                           GestureDetector(
+                            behavior: HitTestBehavior.opaque,
                             onTapUp: (details) => _handleViewportTap(details, constraints),
-                            child: CustomPaint(
-                              painter: GridPainter(
-                                nodes: _nodes,
-                                edges: _edges,
-                                selectedNode: _linkSourceNode,
-                                currentUserPosition: _odometryTracker.currentPosition,
-                                breadcrumbs: _odometryTracker.breadcrumbTrail,
-                                headingRadians: _odometryTracker.headingRadians,
-                              ),
-                              child: Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      _isLinkingMode ? CupertinoIcons.hand_point_right : CupertinoIcons.plus_circle,
-                                      color: Colors.white70,
-                                      size: 40,
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black.withValues(alpha: 0.65),
-                                        borderRadius: BorderRadius.circular(16),
-                                        border: Border.all(color: Colors.white24),
-                                      ),
-                                      child: Text(
-                                        _isLinkingMode
-                                            ? 'Tap any node in inspector to link'
-                                            : 'Point camera at floor & tap to drop node',
-                                        style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
+                            onHorizontalDragUpdate: (details) {
+                              setState(() {
+                                _orientationTracker.rotateHeading(details.primaryDelta! * 0.006);
+                                _odometryTracker.setHeading(_orientationTracker.headingRadians);
+                                _updateAdvisorAlert();
+                              });
+                            },
+                            child: AnimatedBuilder(
+                              animation: _pulseAnimationController,
+                              builder: (context, _) {
+                                final painter = ArMappingPerspectivePainter(
+                                  nodes: _nodes,
+                                  edges: _edges,
+                                  selectedNode: _selectedNode,
+                                  linkSourceNode: _linkSourceNode,
+                                  currentUserPosition: _odometryTracker.currentPosition,
+                                  headingRadians: _orientationTracker.headingRadians,
+                                  pitchRadians: _orientationTracker.pitchRadians,
+                                  rollRadians: _orientationTracker.rollRadians,
+                                  breadcrumbs: _odometryTracker.breadcrumbTrail,
+                                  targetFloorPosition: _targetFloorPosition,
+                                  targetDistanceAhead: _targetDistanceAhead,
+                                  isReticleVisible: !_isLinkingMode,
+                                  animationProgress: _pulseAnimationController.value,
+                                );
+                                _lastPainter = painter;
+
+                                return CustomPaint(
+                                  painter: painter,
+                                  child: const SizedBox.expand(),
+                                );
+                              },
                             ),
                           ),
                         ],
@@ -746,34 +1043,47 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                       right: 16,
                       child: Row(
                         children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.85),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: Colors.white24),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: _isRecordingActive ? Colors.redAccent : Colors.amberAccent,
+                          InkWell(
+                            borderRadius: BorderRadius.circular(20),
+                            onTap: _toggleTracking,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.85),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: _isTrackingActive ? const Color(0xFF10B981) : Colors.amberAccent,
+                                  width: 1.2,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: _isTrackingActive ? const Color(0xFF10B981) : Colors.amberAccent,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  _nodes.isEmpty
-                                      ? (_mappingSessionActive ? 'AR Ready' : 'Initializing AR...')
-                                      : (_isRecordingActive
-                                          ? '● REC: ${_odometryTracker.distanceFromLastNode.toStringAsFixed(1)}m'
-                                          : '⏸ PAUSED: ${_odometryTracker.distanceFromLastNode.toStringAsFixed(1)}m'),
-                                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                                ),
-                              ],
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    _nodes.isEmpty
+                                        ? (_mappingSessionActive ? 'AR Ready' : 'Initializing AR...')
+                                        : (_isTrackingActive
+                                            ? '● LIVE: ${_odometryTracker.distanceFromLastNode.toStringAsFixed(1)}m'
+                                            : '⏸ PAUSED: ${_odometryTracker.distanceFromLastNode.toStringAsFixed(1)}m'),
+                                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Icon(
+                                    _isTrackingActive ? CupertinoIcons.pause_fill : CupertinoIcons.play_fill,
+                                    size: 11,
+                                    color: Colors.white70,
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
 
@@ -847,7 +1157,7 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                       Positioned(
                         top: 68,
                         left: 16,
-                        right: 16,
+                        right: _nodes.isNotEmpty ? 144 : 16,
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                           decoration: BoxDecoration(
@@ -907,7 +1217,7 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                       Positioned(
                         top: _currentAlert != null ? 120 : 68,
                         left: 16,
-                        right: 16,
+                        right: _nodes.isNotEmpty ? 144 : 16,
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                           decoration: BoxDecoration(
@@ -945,56 +1255,216 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                         ),
                       ),
 
-                    // 5. Circular Walk & Path Tracking Button with Flick-to-Lock (Centered)
+                    // 5. Corner Mini-Map Radar (Floating Top-Right)
+                    if (_nodes.isNotEmpty)
+                      Positioned(
+                        top: 72,
+                        right: 16,
+                        child: MappingMiniMap(
+                          nodes: _nodes,
+                          edges: _edges,
+                          currentUserPosition: _odometryTracker.currentPosition,
+                          headingRadians: _orientationTracker.headingRadians,
+                          selectedNode: _selectedNode,
+                          breadcrumbs: _odometryTracker.breadcrumbTrail,
+                        ),
+                      ),
+
+                    // 6. Quick Turn Controls (Corridor Angle Stepper)
                     Positioned(
-                      bottom: 84,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: WalkTrackButton(
-                          isRecording: _isHoldingToRecord,
-                          isLocked: _isHandsFreeLocked,
-                          distanceTraversedMeters: _nodes.isNotEmpty
-                              ? _odometryTracker.distanceFromLastNode
-                              : null,
-                          onRecordingChanged: (recording) {
-                            setState(() {
-                              _isHoldingToRecord = recording;
-                              if (recording) {
-                                _odometryTracker.startRecording();
-                              } else if (!_isHandsFreeLocked) {
-                                _odometryTracker.pauseRecording();
-                              }
-                              _updateAdvisorAlert();
-                            });
-                          },
-                          onLockChanged: (locked) {
-                            setState(() {
-                              _isHandsFreeLocked = locked;
-                              if (locked) {
-                                _odometryTracker.startRecording();
-                              } else {
-                                _isHoldingToRecord = false;
-                                _odometryTracker.pauseRecording();
-                              }
-                              _updateAdvisorAlert();
-                            });
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  locked
-                                      ? '🔒 TRACKING LOCKED: Walking tracked hands-free!'
-                                      : '🔓 TRACKING UNLOCKED: Path tracking paused.',
+                      top: _nodes.isNotEmpty ? 204 : 72,
+                      right: 16,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.82),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.white24),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.4),
+                              blurRadius: 8,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            InkWell(
+                              onTap: _calibrateForward,
+                              borderRadius: BorderRadius.circular(8),
+                              child: Tooltip(
+                                message: 'Tap to align forward',
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    '${_orientationTracker.headingDegrees.round()}°',
+                                    style: const TextStyle(
+                                      color: Color(0xFF38BDF8),
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
                                 ),
-                                duration: const Duration(seconds: 2),
                               ),
-                            );
-                          },
+                            ),
+                            const SizedBox(height: 6),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                              tooltip: 'Turn Left 90°',
+                              icon: const Icon(CupertinoIcons.arrow_turn_up_left, color: Colors.white, size: 18),
+                              onPressed: _turnLeft90,
+                            ),
+                            const SizedBox(height: 2),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                              tooltip: 'Turn Right 90°',
+                              icon: const Icon(CupertinoIcons.arrow_turn_up_right, color: Colors.white, size: 18),
+                              onPressed: _turnRight90,
+                            ),
+                            const SizedBox(height: 2),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                              tooltip: 'Turn Around 180°',
+                              icon: const Icon(CupertinoIcons.arrow_2_circlepath, color: Colors.white70, size: 16),
+                              onPressed: _turnAround180,
+                            ),
+                          ],
                         ),
                       ),
                     ),
 
-                    // 6. Bottom Floating Action Toolbar
+                    // 7. Dual Placement & Reticle Distance Bar (Above Walk Track Button)
+                    Positioned(
+                      bottom: 154,
+                      left: 16,
+                      right: 16,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF090D16).withValues(alpha: 0.90),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.white12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.45),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Distance preset chips
+                            Row(
+                              children: [
+                                const Icon(CupertinoIcons.scope, size: 14, color: Color(0xFF38BDF8)),
+                                const SizedBox(width: 6),
+                                const Text(
+                                  'Target:',
+                                  style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: SingleChildScrollView(
+                                    scrollDirection: Axis.horizontal,
+                                    child: Row(
+                                      children: [1.0, 1.8, 2.5, 3.5].map((dist) {
+                                        final isCurrent = (_targetDistanceAhead - dist).abs() < 0.2;
+                                        return Padding(
+                                          padding: const EdgeInsets.only(right: 6),
+                                          child: InkWell(
+                                            borderRadius: BorderRadius.circular(12),
+                                            onTap: () {
+                                              setState(() => _targetDistanceAhead = dist);
+                                            },
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                              decoration: BoxDecoration(
+                                                color: isCurrent ? const Color(0xFF38BDF8) : Colors.white.withValues(alpha: 0.08),
+                                                borderRadius: BorderRadius.circular(12),
+                                                border: Border.all(
+                                                  color: isCurrent ? const Color(0xFF38BDF8) : Colors.white12,
+                                                ),
+                                              ),
+                                              child: Text(
+                                                '${dist.toStringAsFixed(1)}m',
+                                                style: TextStyle(
+                                                  color: isCurrent ? Colors.black : Colors.white,
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            // Dual Drop Buttons
+                            Row(
+                              children: [
+                                Expanded(
+                                  flex: 3,
+                                  child: FilledButton.icon(
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: const Color(0xFF0284C7),
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 8),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    ),
+                                    icon: const Icon(CupertinoIcons.plus_circle_fill, size: 16),
+                                    label: Text(
+                                      'Drop at Target (${_targetDistanceAhead.toStringAsFixed(1)}m)',
+                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    onPressed: () => _showAddNodeDialog(_targetFloorPosition),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  flex: 2,
+                                  child: FilledButton.icon(
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: const Color(0xFF10B981),
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 8),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    ),
+                                    icon: const Icon(CupertinoIcons.location_fill, size: 16),
+                                    label: const Text(
+                                      'Drop at Feet',
+                                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    onPressed: () => _showAddNodeDialog(_odometryTracker.currentPosition),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // 8. Bottom Floating Action Toolbar
                     Positioned(
                       bottom: 20,
                       left: 16,
@@ -1007,8 +1477,7 @@ class _AdminMappingScreenState extends State<AdminMappingScreen> {
                         onToggleTorch: _toggleTorch,
                         onUndo: _undoLastNode,
                         onAddNode: () {
-                          final position = _odometryTracker.calculateNodePosition();
-                          _showAddNodeDialog(position);
+                          _showAddNodeDialog(_targetFloorPosition);
                         },
                         onToggleLinkingMode: () {
                           setState(() => _isLinkingMode = !_isLinkingMode);

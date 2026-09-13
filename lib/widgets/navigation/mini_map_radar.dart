@@ -15,6 +15,7 @@ class MiniMapRadar extends StatelessWidget {
   final List<TurnInstruction> turnInstructions;
   final int currentInstructionIndex;
   final Vector3? userPosition;
+  final List<Position>? walkedBreadcrumbs;
   final VoidCallback onTap;
 
   const MiniMapRadar({
@@ -25,6 +26,7 @@ class MiniMapRadar extends StatelessWidget {
     required this.turnInstructions,
     required this.currentInstructionIndex,
     this.userPosition,
+    this.walkedBreadcrumbs,
     required this.onTap,
   });
 
@@ -59,6 +61,7 @@ class MiniMapRadar extends StatelessWidget {
                 turnInstructions: turnInstructions,
                 currentInstructionIndex: currentInstructionIndex,
                 userPosition: userPosition,
+                walkedBreadcrumbs: walkedBreadcrumbs,
                 isMiniMap: true,
               ),
             ),

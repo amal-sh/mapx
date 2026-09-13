@@ -17,6 +17,7 @@ class FloorMapView extends StatelessWidget {
   final MapNode destination;
   final MapNode? startNode;
   final Vector3? userPosition;
+  final List<Position>? walkedBreadcrumbs;
 
   const FloorMapView({
     super.key,
@@ -28,6 +29,7 @@ class FloorMapView extends StatelessWidget {
     required this.destination,
     this.startNode,
     this.userPosition,
+    this.walkedBreadcrumbs,
   });
 
   @override
@@ -44,6 +46,7 @@ class FloorMapView extends StatelessWidget {
           destination: destination,
           startNode: startNode,
           userPosition: userPosition,
+          walkedBreadcrumbs: walkedBreadcrumbs,
           isMiniMap: false,
         ),
         child: const SizedBox.expand(),
@@ -64,6 +67,7 @@ class FloorMapPainter extends CustomPainter {
   final MapNode? destination;
   final MapNode? startNode;
   final Vector3? userPosition;
+  final List<Position>? walkedBreadcrumbs;
   final bool isMiniMap;
 
   FloorMapPainter({
@@ -75,6 +79,7 @@ class FloorMapPainter extends CustomPainter {
     this.destination,
     this.startNode,
     this.userPosition,
+    this.walkedBreadcrumbs,
     required this.isMiniMap,
   });
 
@@ -248,6 +253,29 @@ class FloorMapPainter extends CustomPainter {
         );
         final tp = TextPainter(text: destText, textDirection: TextDirection.ltr)..layout();
         tp.paint(canvas, Offset(destPos.dx - tp.width / 2, destPos.dy - tp.height / 2));
+      }
+
+      // 5.5 Draw walked breadcrumbs (Dropped dots along tracked walking path)
+      if (walkedBreadcrumbs != null && walkedBreadcrumbs!.isNotEmpty) {
+        final breadcrumbTrailPaint = Paint()
+          ..color = const Color(0xFF00E5FF).withValues(alpha: 0.45)
+          ..strokeWidth = isMiniMap ? 1.5 : 2.5
+          ..strokeCap = StrokeCap.round
+          ..style = PaintingStyle.stroke;
+
+        final breadcrumbDotPaint = Paint()
+          ..color = const Color(0xFF38BDF8)
+          ..style = PaintingStyle.fill;
+
+        Offset? prevPoint;
+        for (final b in walkedBreadcrumbs!) {
+          final pt = mapPoint(b);
+          if (prevPoint != null) {
+            canvas.drawLine(prevPoint, pt, breadcrumbTrailPaint);
+          }
+          prevPoint = pt;
+          canvas.drawCircle(pt, isMiniMap ? 2.0 : 3.5, breadcrumbDotPaint);
+        }
       }
 
       // User's active position dot if simulated walk is happening

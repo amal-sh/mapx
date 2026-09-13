@@ -68,12 +68,10 @@ class SpatialOdometryTracker {
     if (node != null) {
       _lastPlacedNodePosition = node.position;
       _stepsSinceLastNode = 0;
-      _breadcrumbTrail.clear();
       _addBreadcrumb(node.position);
     } else {
       _lastPlacedNodePosition = null;
       _stepsSinceLastNode = 0;
-      _breadcrumbTrail.clear();
     }
   }
 
@@ -226,6 +224,11 @@ class SpatialOdometryTracker {
     _breadcrumbTrail.clear();
   }
 
+  /// Explicitly clears breadcrumbs.
+  void clearBreadcrumbs() {
+    _breadcrumbTrail.clear();
+  }
+
   void _addBreadcrumb(Position pos) {
     if (_breadcrumbTrail.isNotEmpty) {
       final last = _breadcrumbTrail.last.position;
@@ -238,7 +241,7 @@ class SpatialOdometryTracker {
     _breadcrumbTrail.add(
       BreadcrumbPoint(position: pos, timestamp: DateTime.now()),
     );
-    if (_breadcrumbTrail.length > 200) {
+    if (_breadcrumbTrail.length > 500) {
       _breadcrumbTrail.removeAt(0);
     }
   }
