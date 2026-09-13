@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
@@ -10,19 +12,28 @@ class NodeFormDialog extends StatefulWidget {
     required this.suggestedLabel,
     required this.initialType,
     required this.onConfirm,
+    this.previousNodeLabel,
+    this.previousNodePosition,
+    this.initialDistance,
   });
 
   final Position position;
   final String suggestedLabel;
   final NodeType initialType;
-  final void Function(String label, NodeType type) onConfirm;
+  final void Function(String label, NodeType type, Position position) onConfirm;
+  final String? previousNodeLabel;
+  final Position? previousNodePosition;
+  final double? initialDistance;
 
   static void show({
     required BuildContext context,
     required Position position,
     required String suggestedLabel,
     required NodeType initialType,
-    required void Function(String label, NodeType type) onConfirm,
+    required void Function(String label, NodeType type, Position position) onConfirm,
+    String? previousNodeLabel,
+    Position? previousNodePosition,
+    double? initialDistance,
   }) {
     showModalBottomSheet<void>(
       context: context,
@@ -36,6 +47,9 @@ class NodeFormDialog extends StatefulWidget {
         suggestedLabel: suggestedLabel,
         initialType: initialType,
         onConfirm: onConfirm,
+        previousNodeLabel: previousNodeLabel,
+        previousNodePosition: previousNodePosition,
+        initialDistance: initialDistance,
       ),
     );
   }
@@ -47,12 +61,20 @@ class NodeFormDialog extends StatefulWidget {
 class _NodeFormDialogState extends State<NodeFormDialog> {
   late final TextEditingController _labelController;
   late NodeType _selectedType;
+  late Position _currentPosition;
+  double? _distance;
 
   @override
   void initState() {
     super.initState();
     _labelController = TextEditingController(text: widget.suggestedLabel);
     _selectedType = widget.initialType;
+    _currentPosition = widget.position;
+
+    if (widget.previousNodePosition != null) {
+      _distance = widget.initialDistance ??
+          widget.previousNodePosition!.distanceTo(widget.position);
+    }
   }
 
   @override
@@ -61,9 +83,41 @@ class _NodeFormDialogState extends State<NodeFormDialog> {
     super.dispose();
   }
 
+  void _adjustDistance(double delta) {
+    if (_distance == null || widget.previousNodePosition == null) return;
+    final newDistance = math.max(0.5, _distance! + delta);
+    setState(() {
+      _distance = double.parse(newDistance.toStringAsFixed(2));
+
+      // Adjust _currentPosition along the vector from previous node
+      final prev = widget.previousNodePosition!;
+      final dx = _currentPosition.x - prev.x;
+      final dz = _currentPosition.z - prev.z;
+      final currentLen = math.sqrt(dx * dx + dz * dz);
+
+      if (currentLen > 0.05) {
+        final unitX = dx / currentLen;
+        final unitZ = dz / currentLen;
+        _currentPosition = Position(
+          x: double.parse((prev.x + unitX * _distance!).toStringAsFixed(2)),
+          y: 0.0,
+          z: double.parse((prev.z + unitZ * _distance!).toStringAsFixed(2)),
+        );
+      } else {
+        // If overlapping, push forward along Z
+        _currentPosition = Position(
+          x: prev.x,
+          y: 0.0,
+          z: double.parse((prev.z + _distance!).toStringAsFixed(2)),
+        );
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isTooClose = _distance != null && _distance! < 0.8;
 
     return Padding(
       padding: EdgeInsets.only(
@@ -92,7 +146,7 @@ class _NodeFormDialogState extends State<NodeFormDialog> {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  '(${widget.position.x.toStringAsFixed(1)}m, ${widget.position.z.toStringAsFixed(1)}m)',
+                  '(${_currentPosition.x.toStringAsFixed(1)}m, ${_currentPosition.z.toStringAsFixed(1)}m)',
                   style: TextStyle(
                     color: colorScheme.onPrimaryContainer,
                     fontWeight: FontWeight.w600,
@@ -102,6 +156,85 @@ class _NodeFormDialogState extends State<NodeFormDialog> {
               ),
             ],
           ),
+
+          // Distance From Previous Node & Stepper Adjustment
+          if (widget.previousNodeLabel != null && _distance != null) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: isTooClose
+                    ? const Color(0xFFFEF3C7)
+                    : const Color(0xFFF4F4F5),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: isTooClose ? const Color(0xFFF59E0B) : const Color(0xFFE4E4E7),
+                ),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        isTooClose ? CupertinoIcons.exclamationmark_triangle_fill : CupertinoIcons.arrow_right_arrow_left,
+                        size: 16,
+                        color: isTooClose ? const Color(0xFFD97706) : const Color(0xFF71717A),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Distance from "${widget.previousNodeLabel}":',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: isTooClose ? const Color(0xFF92400E) : const Color(0xFF3F3F46),
+                          ),
+                        ),
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(CupertinoIcons.minus_circle, size: 20),
+                            onPressed: () => _adjustDistance(-0.5),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: const Color(0xFFD4D4D8)),
+                            ),
+                            child: Text(
+                              '${_distance!.toStringAsFixed(2)}m',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(CupertinoIcons.plus_circle, size: 20),
+                            onPressed: () => _adjustDistance(0.5),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  if (isTooClose) ...[
+                    const SizedBox(height: 6),
+                    const Text(
+                      '⚠️ Nodes are too close (<0.8m) and may overlap. Tap "+" to space out or step forward.',
+                      style: TextStyle(fontSize: 11, color: Color(0xFFB45309), fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+
           const SizedBox(height: 16),
           TextField(
             controller: _labelController,
@@ -166,7 +299,7 @@ class _NodeFormDialogState extends State<NodeFormDialog> {
                     ? widget.suggestedLabel
                     : _labelController.text.trim();
                 Navigator.of(context).pop();
-                widget.onConfirm(label, _selectedType);
+                widget.onConfirm(label, _selectedType, _currentPosition);
               },
             ),
           ),

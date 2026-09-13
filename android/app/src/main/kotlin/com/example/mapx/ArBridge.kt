@@ -136,12 +136,16 @@ class ArBridge(private val flutterEngine: FlutterEngine) {
                     "hitTest" -> {
                         val screenX = call.argument<Double>("screenX") ?: 0.0
                         val screenY = call.argument<Double>("screenY") ?: 0.0
-                        Log.d(TAG, "hitTest(x=$screenX, y=$screenY)")
-                        // Return 3D coordinates (meters).
+                        val currentX = call.argument<Double>("currentX") ?: 0.0
+                        val currentZ = call.argument<Double>("currentZ") ?: 0.0
+                        Log.d(TAG, "hitTest(x=$screenX, y=$screenY, currentX=$currentX, currentZ=$currentZ)")
+                        // Return 3D coordinates relative to current world translation.
+                        val tapOffsetX = Math.round((screenX * 4.0 - 2.0) * 100.0) / 100.0
+                        val tapOffsetZ = Math.round((screenY * 3.0) * 100.0) / 100.0
                         val pose = mapOf(
-                            "x" to Math.round((screenX * 10 - 5) * 100.0) / 100.0,
+                            "x" to Math.round((currentX + tapOffsetX) * 100.0) / 100.0,
                             "y" to 0.0,
-                            "z" to Math.round((screenY * 10) * 100.0) / 100.0
+                            "z" to Math.round((currentZ + tapOffsetZ) * 100.0) / 100.0
                         )
                         result.success(pose)
                     }

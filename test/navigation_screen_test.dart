@@ -238,8 +238,8 @@ void main() {
       await tester.pumpAndSettle();
 
       // Verify bottom sheet opened
-      expect(find.text('Select Current Location'), findsOneWidget);
-      expect(find.text('Ground Floor • Navigating to Room 101'), findsOneWidget);
+      expect(find.text('Select Start Location'), findsOneWidget);
+      expect(find.text('Ground Floor • To Room 101'), findsOneWidget);
 
       // Select 'Corridor Junction' from the list
       final junctionTile = find.widgetWithText(InkWell, 'Corridor Junction');
@@ -248,7 +248,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Bottom sheet closed and route recomputed from Corridor Junction
-      expect(find.text('Select Current Location'), findsNothing);
+      expect(find.text('Select Start Location'), findsNothing);
       expect(find.textContaining('From: Corridor Junction'), findsWidgets);
       expect(find.textContaining('Total: 6.0m to Room 101'), findsOneWidget);
     });

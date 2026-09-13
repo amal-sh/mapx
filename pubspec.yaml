@@ -110,6 +110,6 @@ flutter_launcher_icons:
   image_path: "assets/images/app_icon.png"
 
 flutter_native_splash:
-  color: "#ffffff"               
-  image: assets/images/mapx_logo_transp.png
+  color: "#000000"         
+  image: assets/images/dark_banner.png
 

@@ -115,14 +115,21 @@ class ArBridge {
     }
   }
 
-  Future<Vector3?> hitTest(double screenX, double screenY) async {
+  Future<Vector3?> hitTest(
+    double screenX,
+    double screenY, {
+    double currentX = 0.0,
+    double currentZ = 0.0,
+  }) async {
     if (Platform.environment.containsKey('FLUTTER_TEST')) {
-      return Vector3(screenX * 5, 0, screenY * 5);
+      return Vector3(currentX + (screenX - 0.5) * 4, 0, currentZ + (screenY * 4));
     }
     try {
       final result = await _methodChannel.invokeMapMethod<String, dynamic>('hitTest', {
         'screenX': screenX,
         'screenY': screenY,
+        'currentX': currentX,
+        'currentZ': currentZ,
       });
       if (result != null) {
         return Vector3.fromMap(result);
