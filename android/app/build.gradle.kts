@@ -38,9 +38,18 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    packaging {
+        resources {
+            pickFirsts += listOf("**/libc++_shared.so")
+        }
+    }
 }
 
 dependencies {
+    // SceneView AR (Thomas Gorisse) - 3D Filament rendering & ARCore integration
+    implementation("io.github.sceneview:arsceneview:2.2.1")
+
     // ARCore session, camera frame access, hit-testing.
     implementation("com.google.ar:core:1.56.0")
 

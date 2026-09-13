@@ -224,9 +224,7 @@ class PhysicalOrientationTracker {
         hz /= normH;
 
         // M' = A x H (North vector, horizontal)
-        // Up x East = North
-        final mxPrime = ay * hz - az * hy;
-        final myPrime = az * hx - ax * hz;
+        // Up x East = North: only mzPrime is required for the camera -Z North component
         final mzPrime = ax * hy - ay * hx;
 
         // Camera pointing direction is -Z of device in portrait.

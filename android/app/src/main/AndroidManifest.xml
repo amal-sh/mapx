@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -13,7 +14,10 @@
         android:icon="@mipmap/launcher_icon">
         <!-- Tells the Play Store this app requires ARCore (Google Play Services
              for AR); paired with the uses-feature tag above. -->
-        <meta-data android:name="com.google.ar.core" android:value="required" />
+        <meta-data
+            android:name="com.google.ar.core"
+            android:value="required"
+            tools:replace="android:value" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

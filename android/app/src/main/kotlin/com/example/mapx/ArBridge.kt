@@ -139,15 +139,24 @@ class ArBridge(private val flutterEngine: FlutterEngine) {
                         val currentX = call.argument<Double>("currentX") ?: 0.0
                         val currentZ = call.argument<Double>("currentZ") ?: 0.0
                         Log.d(TAG, "hitTest(x=$screenX, y=$screenY, currentX=$currentX, currentZ=$currentZ)")
-                        // Return 3D coordinates relative to current world translation.
-                        val tapOffsetX = Math.round((screenX * 4.0 - 2.0) * 100.0) / 100.0
-                        val tapOffsetZ = Math.round((screenY * 3.0) * 100.0) / 100.0
-                        val pose = mapOf(
-                            "x" to Math.round((currentX + tapOffsetX) * 100.0) / 100.0,
-                            "y" to 0.0,
-                            "z" to Math.round((currentZ + tapOffsetZ) * 100.0) / 100.0
-                        )
-                        result.success(pose)
+
+                        // 1. Perform true physical ARCore plane hit-test via SceneView PlatformView
+                        val realHitPose = activePlatformView?.performHitTest(screenX, screenY)
+                        if (realHitPose != null) {
+                            Log.d(TAG, "hitTest: Returning real ARCore physical plane hit: $realHitPose")
+                            result.success(realHitPose)
+                        } else {
+                            // 2. Fallback to estimated offset if no plane hit or running on non-AR emulator
+                            val tapOffsetX = Math.round((screenX * 4.0 - 2.0) * 100.0) / 100.0
+                            val tapOffsetZ = Math.round((screenY * 3.0) * 100.0) / 100.0
+                            val fallbackPose = mapOf(
+                                "x" to Math.round((currentX + tapOffsetX) * 100.0) / 100.0,
+                                "y" to 0.0,
+                                "z" to Math.round((currentZ + tapOffsetZ) * 100.0) / 100.0
+                            )
+                            Log.d(TAG, "hitTest: Returning fallback plane pose: $fallbackPose")
+                            result.success(fallbackPose)
+                        }
                     }
 
                     "stopMappingSession" -> {

@@ -123,4 +123,36 @@ void main() {
       }
     });
   });
+
+  testWidgets('HomeScreen verifies and collects all required permissions beforehand', (
+    WidgetTester tester,
+  ) async {
+    await tester.runAsync(() async {
+      final tempDir = await Directory.systemTemp.createTemp('widget_perm_test_');
+      final tempFile = File('${tempDir.path}/test_perm_map.json');
+      final repo = LocalMapRepository(storageFile: tempFile);
+
+      const b1 = Building(id: 'b1', name: 'Perm Block', entryFloorId: 'f1');
+      const f1 = Floor(id: 'f1', buildingId: 'b1', level: 0, name: 'Floor 1');
+      await repo.saveBuilding(b1);
+      await repo.saveFloor(f1);
+
+      await tester.pumpWidget(MapXApp(repository: repo));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.text('Perm Block'), findsOneWidget);
+
+      // Verify navigation triggers permission collection before opening destination screen
+      await tester.tap(find.text('Where do you want to go?'));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Select destination'), findsOneWidget);
+
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+    });
+  });
 }

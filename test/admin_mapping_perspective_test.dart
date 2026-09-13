@@ -5,7 +5,6 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mapx/data/local_map_repository.dart';
-import 'package:mapx/logic/bezier_smoother.dart';
 import 'package:mapx/logic/spatial_odometry_tracker.dart';
 import 'package:mapx/models/building.dart';
 import 'package:mapx/models/floor.dart';
@@ -202,12 +201,8 @@ void main() {
         // Heading should now show 90°
         expect(find.text('90°'), findsOneWidget);
 
-        // Check step button and tap to advance distance
-        final stepBtn = find.textContaining('+0.7m');
-        expect(stepBtn, findsOneWidget);
-        await tester.tap(stepBtn);
-        await tester.pump(const Duration(milliseconds: 100));
-        expect(find.textContaining('(1s)'), findsOneWidget);
+        // Verify step simulation button is removed
+        expect(find.textContaining('+0.7m'), findsNothing);
 
         if (await tempDir.exists()) {
           await tempDir.delete(recursive: true);

@@ -161,6 +161,8 @@ class _AdminMappingScreenState extends State<AdminMappingScreen>
 
   Future<void> _initCamera() async {
     if (Platform.environment.containsKey('FLUTTER_TEST')) return;
+    // On Android devices, SceneView ARSceneView manages the camera hardware directly.
+    if (Platform.isAndroid) return;
     final granted = await ensureCameraPermission();
     if (!granted) return;
     try {
@@ -458,7 +460,8 @@ class _AdminMappingScreenState extends State<AdminMappingScreen>
 
     if (_isLinkingMode) return;
 
-    // 2. Tapped on floor plane: map screenY to depth distance ahead
+    // 2. Tapped on floor plane: query real ARCore plane hit-test with odometry fallback
+    final screenX = details.localPosition.dx / constraints.maxWidth;
     final screenY = details.localPosition.dy / constraints.maxHeight;
     if (screenY < 0.36) return;
 
@@ -470,9 +473,22 @@ class _AdminMappingScreenState extends State<AdminMappingScreen>
       _selectedNode = null;
     });
 
-    final targetPos = _odometryTracker.calculateNodePosition(
-      forwardOffsetMeters: distanceMeters,
+    Position targetPos;
+    final currentPos = _odometryTracker.currentPosition;
+    final arHit = await ArBridge.instance.hitTest(
+      screenX,
+      screenY,
+      currentX: currentPos.x,
+      currentZ: currentPos.z,
     );
+
+    if (arHit != null) {
+      targetPos = Position(x: arHit.x, y: 0.0, z: arHit.z);
+    } else {
+      targetPos = _odometryTracker.calculateNodePosition(
+        forwardOffsetMeters: distanceMeters,
+      );
+    }
 
     _showAddNodeDialog(targetPos);
   }
@@ -983,7 +999,9 @@ class _AdminMappingScreenState extends State<AdminMappingScreen>
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          if (_cameraInitialized && _cameraController != null)
+                          if (Platform.isAndroid && !Platform.environment.containsKey('FLUTTER_TEST'))
+                            const AndroidView(viewType: 'mapx/ar_scene_view')
+                          else if (_cameraInitialized && _cameraController != null)
                             FittedBox(
                               fit: BoxFit.cover,
                               child: SizedBox(
@@ -1081,38 +1099,6 @@ class _AdminMappingScreenState extends State<AdminMappingScreen>
                                     _isTrackingActive ? CupertinoIcons.pause_fill : CupertinoIcons.play_fill,
                                     size: 11,
                                     color: Colors.white70,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-
-                          const SizedBox(width: 8),
-
-                          // Step simulation button (allows testing walking on any device/emulator)
-                          InkWell(
-                            borderRadius: BorderRadius.circular(20),
-                            onTap: () {
-                              setState(() {
-                                _odometryTracker.recordStep(force: true);
-                                _updateAdvisorAlert();
-                              });
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.85),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(color: Colors.white24),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(CupertinoIcons.arrow_up, size: 14, color: Color(0xFF38BDF8)),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    '+0.7m (${_odometryTracker.stepsSinceLastNode}s)',
-                                    style: const TextStyle(color: Color(0xFF38BDF8), fontSize: 11, fontWeight: FontWeight.bold),
                                   ),
                                 ],
                               ),

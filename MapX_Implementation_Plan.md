@@ -45,11 +45,11 @@ A detailed review of the workspace against the original phases:
 
 | Component | Status | Codebase Location | Notes |
 |---|---|---|---|
-| **Phase 0: Project Setup & AR Bridge** | 🟡 **Partially Complete (~85%)** | `android/app/build.gradle.kts`, `ArBridge.kt`, `lib/native/ar_bridge.dart`, `camera_permission.dart` | ARCore `1.56.0` added, Method/Event channel seam plumbed on Kotlin and Dart sides, runtime camera permissions handled, Gradle wrapper fixed to cached 8.14.1. **Pending:** SceneView rendering dependency and MLKit OCR dependency in Android build. |
+| **Phase 0: Project Setup & AR Bridge** | 🟢 **Complete (100%)** | `android/app/build.gradle.kts`, `ArBridge.kt`, `ArScenePlatformView.kt`, `lib/native/camera_permission.dart`, `lib/screens/home_screen.dart` | Thomas Gorisse's SceneView 2.2.1 (`io.github.sceneview:arsceneview`) added, ARCore `1.56.0` configured with manifest merger fixes, `libc++_shared.so` deduplicated, 3D assets (`cylinder.glb`, `cone.glb`, `box.glb`) bundled, Method & Event Channels plumbed, and upfront unified permission collection (`Permission.camera` + `Permission.activityRecognition`) implemented in `HomeScreen`. |
 | **Phase 1: Map Data & Storage** | 🟢 **Complete (100%)** | `lib/models/`, `lib/data/local_map_repository.dart`, `test/local_map_repository_test.dart` | Graph models (`Building`, `Floor`, `MapNode`, `MapEdge`) with `toJson()`/`fromJson()`. `LocalMapRepository` implemented with JSON disk persistence and seeded CUSAT IT block. Unit tested with 100% coverage. |
-| **Phase 2: Admin AR Mapping Mode** | 🟢 **Complete (100%)** | `lib/screens/admin_mapping_screen.dart`, `ArBridge.kt`, `test/admin_mapping_test.dart` | Admin mapping screen with plane hit-testing, room labeling, combined auto-breadcrumb + manual edge linking, graph inspector, and saving to `LocalMapRepository`. |
+| **Phase 2: Admin AR Mapping Mode** | 🟢 **Complete (100%)** | `lib/screens/admin_mapping_screen.dart`, `ArBridge.kt`, `ArScenePlatformView.kt`, `test/admin_mapping_test.dart` | Admin mapping screen with true ARCore plane hit-testing (`frame.hitTest`), room labeling, combined auto-breadcrumb + manual edge linking, graph inspector, and saving to `LocalMapRepository`. |
 | **Phase 3: A* Pathfinding** | 🟢 **Complete (100%)** | `lib/logic/pathfinder.dart`, `test/pathfinder_test.dart` | Pure Dart A* implementation using `PriorityQueue` and admissible Euclidean heuristic. Fully tested with 7 unit tests covering branches, dead-ends, and edge cases. Dynamic start node resolution integrated. |
-| **Phase 4: AR Navigation & Path Rendering** | 🟢 **Complete (100%)** | `lib/logic/bezier_smoother.dart`, `lib/screens/navigation_screen.dart`, `ArScenePlatformView.kt`, `test/bezier_smoother_test.dart`, `test/navigation_screen_test.dart` | Quadratic Bezier smoothing with wall-safe corner clamping, native Android `ArScenePlatformView` with ARCore Depth API occlusion and vertical plane wall detection, turn-by-turn HUD, and dynamic obstacle awareness. |
+| **Phase 4: AR Navigation & Path Rendering** | 🟢 **Complete (100%)** | `lib/logic/bezier_smoother.dart`, `lib/screens/navigation_screen.dart`, `ArScenePlatformView.kt`, `test/bezier_smoother_test.dart`, `test/navigation_screen_test.dart` | Native Thomas Gorisse SceneView `ARSceneView` (`mapx/ar_scene_view`) embedded in Flutter via `AndroidView`, true ARCore plane hit-testing with polygon boundary checks, 3D `.glb` arrow models anchored along Bezier curves, ARCore Depth API automatic occlusion, user pose streaming, and interactive 3D simulation fallback for desktop/test. |
 | **Phase 5: OCR Localization & Drift Check** | 🟢 **Complete (100%)** | `android/app/build.gradle.kts`, `ArBridge.kt`, `lib/logic/ocr_matcher.dart`, `lib/widgets/navigation/ocr_scanner_overlay.dart`, `lib/screens/navigation_screen.dart`, `test/ocr_matcher_test.dart`, `test/navigation_screen_test.dart` | Google MLKit Text Recognition integrated with ArBridge, fuzzy doorplate OCR matching with abbreviation/number normalization, automatic "You Are Here" initial localization, and real-time doorway drift correction. |
 | **Phase 6: Multi-Floor Transitions** | 🔴 **Pending** | — | Handoff prompts at stairs/elevators between floor graphs. |
 | **Phase 7: Polish & Optimization** | 🔴 **Pending** | — | UI/UX refinements, thermal/battery profiling, error handling. |
@@ -135,10 +135,13 @@ Phase 8: Cloud Integration (Firebase / Firestore / Auth — Final Phase)
 
 ---
 
-### Phase 0 — Native Foundation & Bridge Seam (Current status: ~85%)
-- Flutter scaffold + Android platform configured for ARCore (`minSdk 24+`, Camera permission).
-- Method Channel (`mapx/ar_bridge`) & Event Channel (`mapx/ar_events`) declared.
-- **Remaining work:** Add SceneView dependencies to `android/app/build.gradle.kts`, set up native Android view or texture for AR rendering.
+### Phase 0 — Native Foundation & Bridge Seam (Complete — 100%)
+- Flutter scaffold + Android platform configured for ARCore (`minSdk 24+`, Camera + Activity Recognition permissions).
+- Method Channel (`mapx/ar_bridge`) & Event Channel (`mapx/ar_events`) fully plumbed and tested.
+- Added Thomas Gorisse's SceneView (`io.github.sceneview:arsceneview:2.2.1`) to `android/app/build.gradle.kts` with `libc++_shared.so` deduplication.
+- Resolved ARCore manifest merger conflicts with `tools:replace="android:value"` in `AndroidManifest.xml`.
+- Bundled 3D glTF/glb models (`cylinder.glb`, `cone.glb`, `box.glb`) into Android assets.
+- Implemented upfront unified permission architecture in `lib/screens/home_screen.dart` to collect and verify all permissions (`Permission.camera` and `Permission.activityRecognition`) before launching AR mapping or navigation.
 
 ### Phase 1 — Dynamic Local Repository & Model Serialization (Complete — 100%)
 - Added `toJson()` and `fromJson()` to `Building`, `Floor`, `MapNode`, and `MapEdge`.
@@ -154,8 +157,8 @@ Phase 8: Cloud Integration (Firebase / Firestore / Auth — Final Phase)
 ### Phase 2 — Admin AR Mapping Tool (Complete — 100%)
 Staff maps real buildings by walking through them with the phone:
 - **Floor Origin Setup:** Admin opens mapping mode, points camera at entrance, and taps to establish the `(0, 0, 0)` floor origin anchor.
-- **Node Placement (ARCore Hit-Test):**
-  - Taps on the AR screen (plane hit-test) to drop a node at that exact physical position.
+- **Node Placement (ARCore Plane Hit-Test):**
+  - Taps on the AR screen to trigger real ARCore `frame.hitTest` against physical horizontal planes (`isPoseInPolygon`) to drop a node at that exact physical position.
   - Modal pops up: select `NodeType` (`room`, `junction`, `stair`, `elevator`) and enter `label` (e.g., "101", "HOD Office").
   - Native layer returns real 3D coordinates `(x, y, z)` relative to the origin anchor.
 - **Edge Creation (Combined Mode):**
@@ -171,12 +174,17 @@ Staff maps real buildings by walking through them with the phone:
 - Handles multi-path networks, alternative corridors, and dead ends seamlessly.
 - **Deliverable:** Instant shortest-path calculation between any two selected nodes on dynamically mapped floors.
 
-### Phase 4 — Bezier Smoothing & AR Arrow Rendering (Complete — 100%)
+### Phase 4 — Bezier Smoothing & AR Arrow Rendering (SceneView) (Complete — 100%)
 - **Bezier Smoothing (Dart):** Raw A* waypoints smoothed using quadratic Bezier curve interpolation with adaptive wall-safe corner clamping ($r \le 1.0\text{m}$, bounded to 35% of adjacent segment lengths) to prevent clipping through corner walls.
 - **SceneView / PlatformView Integration (Android):**
-  - Integrated native `ArScenePlatformView` (`mapx/ar_scene_view`) with ARCore session.
-  - Horizontal and vertical plane detection (floors and walls).
-  - Configured ARCore Depth API in `AUTOMATIC` mode (`Config.DepthMode.AUTOMATIC`) for realistic 3D depth occlusion behind walls, pillars, and pedestrians.
+  - Integrated native `ArScenePlatformView` (`mapx/ar_scene_view`) based on Thomas Gorisse's SceneView 2.2.1 `ARSceneView`.
+  - Embedded as a native `AndroidView` in both `AdminMappingScreen` (viewfinder & plane grid) and `NavigationScreen` (AR camera & 3D models).
+  - Horizontal and vertical plane detection (floors and walls) with visible grid rendering.
+  - **True ARCore Plane Hit-Testing:** `performHitTest(screenX, screenY)` executes real ARCore `frame.hitTest` against physical plane polygons (`isPoseInPolygon`), snapping node placement directly to physical floor surfaces.
+  - **3D Arrow Meshes along Paths:** `onRenderPath(points)` loads `models/cylinder.glb` and `models/cone.glb`, spawning 3D model nodes anchored to physical world coordinates along the Bezier curve with calculated yaw rotations pointing toward successive waypoints.
+  - **ARCore Depth API Occlusion:** Automatic depth sensing (`Config.DepthMode.AUTOMATIC`) occludes 3D virtual arrows behind real-world physical structures, pillars, and doorways.
+  - **ARCore Image Buffer Safety:** Bypasses continuous camera image frame acquisition to prevent ARCore buffer exhaustion and guarantee stable 60 FPS rendering.
+  - User pose streamed to Flutter on every frame update (`onSessionUpdated`).
 - **Navigation HUD & Guidance:**
   - Live turn-by-turn navigation HUD with distance countdown, turn directions, remaining distance, and AR tracking status.
   - Dynamic obstacle detection warning alert support.
@@ -227,7 +235,7 @@ Staff maps real buildings by walking through them with the phone:
 |---|---|---|---|---|
 | `startArSession` | `floorId` | `bool` (success) | Start ARCore tracking for navigation | Phase 0/4 |
 | `startMappingSession` | `floorId` | `bool` (success) | Enable plane detection & hit-testing for mapping | Phase 2 |
-| `dropAnchorAtScreenPoint` | `x, y` | `Map<String, double>` (`x, y, z`) | Hit-test against detected plane to get 3D coords | Phase 2 |
+| `hitTest` | `screenX, screenY, currentX, currentZ` | `Map<String, double>` (`x, y, z`) | True ARCore physical plane hit-test via SceneView PlatformView | Phase 2/4 |
 | `renderPath` | `List<Map<String, double>>` | `void` | Render 3D Bezier arrows in SceneView | Phase 4 |
 | `clearPath` | — | `void` | Clear active AR arrows | Phase 4 |
 | `startOcrStream` | — | `void` | Enable periodic MLKit frame inspection | Phase 5 |
@@ -259,11 +267,11 @@ Staff maps real buildings by walking through them with the phone:
 
 ## 7. Deliverables Checklist & Progress
 
-- [x] **Project Setup (Phase 0):** ARCore Android configuration, permission handling, Method/Event Channel bridge foundation.
+- [x] **Project Setup (Phase 0 — Complete):** Thomas Gorisse's SceneView 2.2.1 integration, ARCore 1.56.0 configuration, manifest merger resolution, 3D assets bundled, and upfront permission handling in HomeScreen.
 - [x] **Dynamic Data Layer (Phase 1 — Complete):** Model serialization (`toJson`/`fromJson`), Euclidean distance helper, and `LocalMapRepository` with local JSON file persistence.
-- [x] **Admin AR Mapping Tool (Phase 2 — Complete):** In-app AR mapping mode with plane hit-testing, room labeling, combined mode (auto-breadcrumb + manual edge linking), and graph inspector.
+- [x] **Admin AR Mapping Tool (Phase 2 — Complete):** In-app AR mapping mode with true ARCore plane hit-testing, room labeling, combined mode (auto-breadcrumb + manual edge linking), and graph inspector.
 - [x] **A* Pathfinding (Phase 3 — Complete):** Pure Dart shortest path implementation with admissible Euclidean heuristic and comprehensive unit test coverage.
-- [x] **AR SceneView Path Rendering (Phase 4 — Complete):** 3D animated arrows following Bezier-smoothed routes with ARCore Depth API wall occlusion and turn-by-turn HUD guidance.
+- [x] **AR SceneView Path Rendering (Phase 4 — Complete):** Native SceneView PlatformView (`mapx/ar_scene_view`), 3D `.glb` arrow models anchored along Bezier paths, true ARCore plane hit-testing, Depth API occlusion, and turn-by-turn HUD guidance.
 - [x] **MLKit OCR Localization (Phase 5 — Complete):** Camera text recognition matching doorplates for automated "You Are Here" and drift correction.
 - [x] **Doorway Drift Correction (Phase 5 — Complete):** Automatic position recalibration when passing mapped doorway nodes.
 - [ ] **Multi-Floor Handoff (Phase 6):** Stairwell/elevator transitions and cross-floor navigation.

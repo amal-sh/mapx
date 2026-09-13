@@ -135,6 +135,8 @@ class _NavigationScreenState extends State<NavigationScreen>
 
   Future<void> _initCamera() async {
     if (Platform.environment.containsKey('FLUTTER_TEST')) return;
+    // On Android devices, SceneView ARSceneView manages camera hardware directly.
+    if (Platform.isAndroid) return;
     final granted = await ensureCameraPermission();
     if (!granted) return;
     try {
@@ -628,6 +630,32 @@ class _NavigationScreenState extends State<NavigationScreen>
       child: AnimatedBuilder(
         animation: _arrowAnimationController,
         builder: (context, _) {
+          if (Platform.isAndroid && !Platform.environment.containsKey('FLUTTER_TEST')) {
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                const AndroidView(
+                  viewType: 'mapx/ar_scene_view',
+                ),
+                ArPerspectiveSimulationView(
+                  smoothedPoints: _smoothedPoints,
+                  turnInstructions: _turnInstructions,
+                  currentInstructionIndex: _currentInstructionIndex,
+                  destination: widget.destination,
+                  startNode: _selectedStartNode,
+                  animationProgress: _arrowAnimationController.value,
+                  userPosition: _userPosition,
+                  cameraHeadingRadians: _orientationTracker.headingRadians,
+                  cameraPitchRadians: _orientationTracker.pitchRadians,
+                  cameraRollRadians: _orientationTracker.rollRadians,
+                  isOverlay: true,
+                  hasReachedDestination: _hasReachedDestination,
+                  walkedBreadcrumbs: _walkedBreadcrumbs,
+                ),
+              ],
+            );
+          }
+
           if (_cameraInitialized && _cameraController != null) {
             return Stack(
               fit: StackFit.expand,
