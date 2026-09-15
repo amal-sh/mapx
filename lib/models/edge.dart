@@ -1,3 +1,5 @@
+import 'node.dart';
+
 enum EdgeType { walkable, stair, elevator }
 
 class MapEdge {
@@ -7,6 +9,8 @@ class MapEdge {
   final String floorId;
   final double weight;
   final EdgeType type;
+  /// Exact physical footpath coordinates walked by the admin between fromNodeId and toNodeId.
+  final List<Position>? footpath;
 
   const MapEdge({
     required this.id,
@@ -15,6 +19,7 @@ class MapEdge {
     required this.floorId,
     required this.weight,
     required this.type,
+    this.footpath,
   });
 
   Map<String, dynamic> toJson() => {
@@ -24,6 +29,7 @@ class MapEdge {
         'floorId': floorId,
         'weight': weight,
         'type': type.name,
+        if (footpath != null) 'footpath': footpath!.map((p) => p.toJson()).toList(),
       };
 
   factory MapEdge.fromJson(Map<String, dynamic> json) => MapEdge(
@@ -36,5 +42,10 @@ class MapEdge {
           (t) => t.name == json['type'],
           orElse: () => EdgeType.walkable,
         ),
+        footpath: json['footpath'] != null
+            ? (json['footpath'] as List)
+                .map((p) => Position.fromJson(p as Map<String, dynamic>))
+                .toList()
+            : null,
       );
 }

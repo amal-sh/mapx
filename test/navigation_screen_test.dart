@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mapx/data/local_map_repository.dart';
@@ -11,6 +12,7 @@ import 'package:mapx/native/ar_bridge.dart';
 import 'package:mapx/screens/navigation_screen.dart';
 import 'package:mapx/widgets/navigation/ar_perspective_simulation_view.dart';
 import 'package:mapx/widgets/navigation/floor_map_view.dart';
+import 'package:mapx/widgets/navigation/mini_map_radar.dart';
 
 void main() {
   group('NavigationScreen AR & Bezier Guidance Tests', () {
@@ -51,6 +53,13 @@ void main() {
       label: 'Room 101',
       position: Position(x: 6, y: 0, z: 8),
     );
+    const room102 = MapNode(
+      id: 'room_102',
+      floorId: 'floor-0',
+      type: NodeType.room,
+      label: 'Room 102',
+      position: Position(x: -6, y: 0, z: 8),
+    );
 
     setUp(() async {
       tempDir = await Directory.systemTemp.createTemp('nav_screen_test_');
@@ -62,6 +71,7 @@ void main() {
       await repo.saveNode(entrance);
       await repo.saveNode(junction);
       await repo.saveNode(room101);
+      await repo.saveNode(room102);
 
       await repo.saveEdge(
         const MapEdge(
@@ -78,6 +88,16 @@ void main() {
           id: 'e2',
           fromNodeId: 'junction_1',
           toNodeId: 'room_101',
+          floorId: 'floor-0',
+          weight: 6.0,
+          type: EdgeType.walkable,
+        ),
+      );
+      await repo.saveEdge(
+        const MapEdge(
+          id: 'e3',
+          fromNodeId: 'junction_1',
+          toNodeId: 'room_102',
           floorId: 'floor-0',
           weight: 6.0,
           type: EdgeType.walkable,
@@ -448,6 +468,90 @@ void main() {
       final floorMap = tester.widget<FloorMapView>(find.byType(FloorMapView));
       expect(floorMap.walkedBreadcrumbs, isNotNull);
       expect(floorMap.walkedBreadcrumbs!.length, 3);
+    });
+
+    testWidgets('autonomous 1-hop rerouting detects off-route doorplate and recalculates route', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NavigationScreen(
+            repository: repo,
+            floor: floor,
+            destination: room101,
+            startNode: entrance,
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      // Initial route: Entrance -> Junction -> Room 101 (14m total)
+      expect(find.textContaining('Start from Main Entrance'), findsOneWidget);
+      expect(find.textContaining('Total: 14.0m to Room 101'), findsOneWidget);
+
+      // User accidentally turned into the wrong wing and sees Room 102 (a 1-hop neighbor of junction)
+      ArBridge.instance.injectEvent(
+        OcrMatchEvent(
+          label: 'Room 102',
+          screenX: 0.5,
+          screenY: 0.5,
+          confidence: 0.95,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Verify autonomous rerouting notice was triggered
+      expect(find.textContaining('Off-route detected: rerouting from Room 102'), findsOneWidget);
+
+      // Route recomputed from Room 102: Room 102 -> Junction -> Room 101 (12.0m total)
+      expect(find.textContaining('From: Room 102'), findsWidgets);
+      expect(find.textContaining('Total: 12.0m to Room 101'), findsOneWidget);
+    });
+
+    testWidgets('toggles adaptive mini-map collapse and expand to minimize cognitive load', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NavigationScreen(
+            repository: repo,
+            floor: floor,
+            destination: room101,
+            startNode: entrance,
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      // In default expanded mode, the '2D' fullscreen badge and chevron-down collapse button are present
+      expect(find.text('2D'), findsOneWidget);
+      final collapseBtn = find.descendant(
+        of: find.byType(MiniMapRadar),
+        matching: find.byIcon(CupertinoIcons.chevron_down),
+      );
+      expect(collapseBtn, findsOneWidget);
+
+      // Tap collapse button to minimize mini-map radar
+      await tester.tap(collapseBtn);
+      await tester.pumpAndSettle();
+
+      // Now mini-map is in compact pill mode with 'Radar' label and expand icon
+      expect(find.text('2D'), findsNothing);
+      expect(find.textContaining('Radar'), findsOneWidget);
+      final expandIcon = find.descendant(
+        of: find.byType(MiniMapRadar),
+        matching: find.byIcon(CupertinoIcons.chevron_up),
+      );
+      expect(expandIcon, findsOneWidget);
+
+      // Tap compact pill to expand back
+      await tester.tap(expandIcon);
+      await tester.pumpAndSettle();
+
+      // Fully expanded again
+      expect(find.text('2D'), findsOneWidget);
+      expect(
+        find.descendant(of: find.byType(MiniMapRadar), matching: find.byIcon(CupertinoIcons.chevron_down)),
+        findsOneWidget,
+      );
     });
   });
 }

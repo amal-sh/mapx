@@ -41,6 +41,7 @@ class SpatialOdometryTracker {
   double _totalDistanceWalked = 0.0;
 
   final List<BreadcrumbPoint> _breadcrumbTrail = [];
+  int _lastNodeBreadcrumbIndex = 0;
 
   // Getters
   Position get currentPosition => _currentPosition;
@@ -69,10 +70,26 @@ class SpatialOdometryTracker {
       _lastPlacedNodePosition = node.position;
       _stepsSinceLastNode = 0;
       _addBreadcrumb(node.position);
+      _lastNodeBreadcrumbIndex = _breadcrumbTrail.length;
     } else {
       _lastPlacedNodePosition = null;
       _stepsSinceLastNode = 0;
+      _lastNodeBreadcrumbIndex = _breadcrumbTrail.length;
     }
+  }
+
+  /// Extracts the exact physical trail points walked since the last placed node,
+  /// updating the segment marker so subsequent calls return only new steps.
+  List<Position> consumeTrailSinceLastNode() {
+    if (_lastNodeBreadcrumbIndex >= _breadcrumbTrail.length) {
+      return [];
+    }
+    final trail = _breadcrumbTrail
+        .sublist(_lastNodeBreadcrumbIndex)
+        .map((b) => b.position)
+        .toList();
+    _lastNodeBreadcrumbIndex = _breadcrumbTrail.length;
+    return trail;
   }
 
   /// Updates heading in radians.
@@ -222,11 +239,13 @@ class SpatialOdometryTracker {
     _stepsSinceLastNode = 0;
     _totalDistanceWalked = 0.0;
     _breadcrumbTrail.clear();
+    _lastNodeBreadcrumbIndex = 0;
   }
 
   /// Explicitly clears breadcrumbs.
   void clearBreadcrumbs() {
     _breadcrumbTrail.clear();
+    _lastNodeBreadcrumbIndex = 0;
   }
 
   void _addBreadcrumb(Position pos) {

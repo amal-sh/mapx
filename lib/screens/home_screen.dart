@@ -12,6 +12,7 @@ import '../widgets/home/add_building_dialog.dart';
 import '../widgets/home/building_card.dart';
 import '../widgets/home/empty_buildings_view.dart';
 import '../widgets/home/floor_picker_sheet.dart';
+import '../widgets/mapping/map_json_viewer_dialog.dart';
 import 'admin_mapping_screen.dart';
 import 'destination_select_screen.dart';
 
@@ -155,6 +156,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _viewMapJson(Building building) async {
+    final jsonString = await _repo.exportJson();
+    if (!mounted) return;
+    MapJsonViewerDialog.show(
+      context: context,
+      title: '${building.name} Map JSON',
+      jsonString: jsonString,
     );
   }
 
@@ -382,6 +393,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                   onNavigate: () => _onNavigate(building, floors),
                                   onAdminMap: () => _onAdminMap(building, floors),
                                   onDelete: () => _confirmDeleteBuilding(building),
+                                  onViewJson: () => _viewMapJson(building),
                                 );
                               }),
                               const SizedBox(height: 8),

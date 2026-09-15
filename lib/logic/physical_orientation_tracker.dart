@@ -49,6 +49,10 @@ class PhysicalOrientationTracker {
   /// User-calibrated offset (subtracted from raw azimuth to align with building axis).
   double _referenceHeadingOffset = 0.0;
 
+  /// Circular sliding-window buffer (N=10) for high-frequency magnetic noise suppression
+  static const int _azimuthBufferSize = 10;
+  final List<double> _azimuthBuffer = [];
+
   // Listeners for UI state updates
   final List<VoidCallback> _listeners = [];
 
@@ -233,12 +237,48 @@ class PhysicalOrientationTracker {
         // North component = -Z . M' = -mzPrime
         final rawAzimuth = math.atan2(-hz, -mzPrime);
 
+        // Circular sliding-window FIFO buffer (N=10) to suppress magnetic noise
+        if (filterSmoothing < 1.0) {
+          _azimuthBuffer.add(rawAzimuth);
+          if (_azimuthBuffer.length > _azimuthBufferSize) {
+            _azimuthBuffer.removeAt(0);
+          }
+        } else {
+          _azimuthBuffer
+            ..clear()
+            ..add(rawAzimuth);
+        }
+        final windowedAzimuth = computeCircularAverage(_azimuthBuffer);
+
         // Circular exponential moving average to prevent 0 <-> 2pi wrap-around jitter
-        _headingRadians = _filterCircularAngle(_headingRadians, rawAzimuth, filterSmoothing);
+        _headingRadians = _filterCircularAngle(_headingRadians, windowedAzimuth, filterSmoothing);
       }
     }
 
     _notifyListeners();
+  }
+
+  /// Computes the circular mean across a list of radian angles around the latest angle as base:
+  /// \bar{\psi}_t = \psi_{base} + \frac{1}{N} \sum_{i=1}^N \text{min\_delta}(\psi_{base}, \psi_i)
+  ///
+  /// Prevents 0 <-> 2*pi boundary wrap-around inversion (e.g. averaging 359° and 1° gives 0°, not 180°).
+  static double computeCircularAverage(List<double> angles) {
+    if (angles.isEmpty) return 0.0;
+    if (angles.length == 1) return _normalizeAngle(angles.first);
+
+    final base = angles.last;
+    double sumDelta = 0.0;
+    for (final a in angles) {
+      var delta = a - base;
+      while (delta < -math.pi) {
+        delta += 2 * math.pi;
+      }
+      while (delta > math.pi) {
+        delta -= 2 * math.pi;
+      }
+      sumDelta += delta;
+    }
+    return _normalizeAngle(base + sumDelta / angles.length);
   }
 
   /// Smooths circular angles taking the shortest arc across 0 <-> 2pi.

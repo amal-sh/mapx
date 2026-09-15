@@ -63,6 +63,11 @@ class _NavigationScreenState extends State<NavigationScreen>
   bool _arSessionActive = false;
   bool _show2dFloorMap = false;
   bool _isOcrScanning = false;
+  bool _isMiniMapCollapsed = false;
+  final TemporalOcrVotingBuffer _ocrVotingBuffer = TemporalOcrVotingBuffer(
+    requiredVotes: 2,
+    instantConfidenceThreshold: 0.90,
+  );
   OcrMatchResult? _latestOcrMatch;
   String? _driftCorrectionNotice;
   Timer? _driftNoticeTimer;
@@ -178,11 +183,13 @@ class _NavigationScreenState extends State<NavigationScreen>
 
   void _onOcrMatch(OcrMatchEvent event) {
     if (_allNodes.isEmpty) return;
-    final match = OcrMatcher.findBestMatch(event.label, _allNodes, threshold: 0.65);
-    if (match == null) return;
 
     if (_isOcrScanning || _selectedStartNode == null) {
       // 1. Initial Localization ("You Are Here"): Set start node & compute route
+      final match = OcrMatcher.findBestMatch(event.label, _allNodes, threshold: 0.65);
+      if (match == null) return;
+      if (!_ocrVotingBuffer.recordVote(match.node.id, match.confidence)) return;
+
       setState(() {
         _latestOcrMatch = match;
         _isOcrScanning = false;
@@ -212,14 +219,60 @@ class _NavigationScreenState extends State<NavigationScreen>
         );
       }
     } else {
-      // 2. Doorway Drift Correction: recalibrate user position along active path
+      // 2. Active Navigation: Context-Constrained 1-Hop Matching & Autonomous Rerouting
+      final activeNodes = <MapNode>[];
+      // Vertex Deterministic Active Loop: candidate search space = N_1(v_curr) U N_1(v_next)
+      if (_turnInstructions.isNotEmpty) {
+        final currInst = _turnInstructions[_currentInstructionIndex.clamp(0, _turnInstructions.length - 1)];
+        final matchedCurr = _allNodes.where(
+          (n) => (n.position.x - currInst.position.x).abs() < 0.5 && (n.position.z - currInst.position.z).abs() < 0.5,
+        );
+        activeNodes.addAll(matchedCurr);
+
+        if (_currentInstructionIndex + 1 < _turnInstructions.length) {
+          final nextInst = _turnInstructions[_currentInstructionIndex + 1];
+          final matchedNext = _allNodes.where(
+            (n) => (n.position.x - nextInst.position.x).abs() < 0.5 && (n.position.z - nextInst.position.z).abs() < 0.5,
+          );
+          activeNodes.addAll(matchedNext);
+        }
+      }
+      if (activeNodes.isEmpty && _path.isNotEmpty) {
+        activeNodes.addAll(_path);
+      }
+
+      final candidates = OcrMatcher.getContextConstrainedCandidates(
+        activeNodes: activeNodes,
+        allNodes: _allNodes,
+        allEdges: _allEdges,
+        hopRadius: 1,
+      );
+
+      var match = OcrMatcher.findBestMatch(event.label, candidates, threshold: 0.65);
+
+      // Global fallback if no local candidate matched and detection is high confidence or tracking degraded
+      match ??= OcrMatcher.findBestMatch(event.label, _allNodes, threshold: 0.80);
+
+      if (match == null) return;
+      if (!_ocrVotingBuffer.recordVote(match.node.id, match.confidence)) return;
+
+      final isOnCurrentPath = _path.any((n) => n.id == match!.node.id);
       final nodePos = match.node.position;
       _updateUserPosition(Vector3(nodePos.x, nodePos.y, nodePos.z));
 
       _driftNoticeTimer?.cancel();
-      setState(() {
-        _driftCorrectionNotice = '📍 Odometry calibrated at ${match.node.label}';
-      });
+      if (isOnCurrentPath) {
+        // Doorway Drift Correction along active path
+        setState(() {
+          _driftCorrectionNotice = '📍 Odometry calibrated at ${match!.node.label}';
+        });
+      } else {
+        // Autonomous 1-Hop Local Rerouting: User took an off-route turn
+        _recomputeRoute(match.node);
+        setState(() {
+          _driftCorrectionNotice = '🔄 Off-route detected: rerouting from ${match!.node.label}';
+        });
+      }
       _driftNoticeTimer = Timer(const Duration(seconds: 4), () {
         if (mounted) setState(() => _driftCorrectionNotice = null);
       });
@@ -280,6 +333,11 @@ class _NavigationScreenState extends State<NavigationScreen>
         if (dist < 1.8) {
           _currentInstructionIndex++;
         }
+      }
+
+      // Cognitive-load optimization (Vertex study): Auto-expand mini-map when approaching turn waypoint (< 5.0m)
+      if (_isMiniMapCollapsed && _currentInstruction != null && _currentInstruction!.distanceToTurn <= 5.0) {
+        _isMiniMapCollapsed = false;
       }
     });
 
@@ -499,11 +557,7 @@ class _NavigationScreenState extends State<NavigationScreen>
     final nodes = await widget.repository.getNodes(widget.floor.id);
     final edges = await widget.repository.getEdges(widget.floor.id);
 
-    MapNode? initialStart = widget.startNode;
-    // In headless widget tests without an explicit start node, default to entrance for test compatibility
-    if (initialStart == null && Platform.environment.containsKey('FLUTTER_TEST')) {
-      initialStart = _resolveDefaultStart(nodes);
-    }
+    MapNode? initialStart = widget.startNode ?? _resolveDefaultStart(nodes);
 
     setState(() {
       _allNodes = nodes;
@@ -514,7 +568,7 @@ class _NavigationScreenState extends State<NavigationScreen>
     if (initialStart != null) {
       await _recomputeRoute(initialStart);
     } else {
-      // In interactive app mode, prompt user to select their current location first
+      // In interactive app mode if no nodes found, prompt user
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _selectedStartNode == null) {
           _showStartLocationPicker();
@@ -540,8 +594,24 @@ class _NavigationScreenState extends State<NavigationScreen>
       endNodeId: widget.destination.id,
     );
 
-    final smoothed = BezierSmoother.smoothPath(path);
+    // Smooth path incorporating the exact physical footpaths walked by admin
+    final smoothed = BezierSmoother.smoothPath(path, edges: _allEdges);
     final instructions = BezierSmoother.extractTurnInstructions(path);
+
+    // Align user orientation: assume user is facing the exact same direction as the admin mapped
+    double? initialHeading = startNode.heading;
+    if (initialHeading == null && smoothed.length > 1) {
+      final dx = smoothed[1].position.x - smoothed[0].position.x;
+      final dz = smoothed[1].position.z - smoothed[0].position.z;
+      initialHeading = math.atan2(dx, dz);
+    }
+    initialHeading ??= widget.floor.initialHeadingRadians;
+    if (initialHeading != null) {
+      _orientationTracker.setHeading(initialHeading);
+    }
+
+    // Set initial position: assume user is standing at the exact start point mapped by admin
+    final initialPos = Vector3(startNode.position.x, startNode.position.y, startNode.position.z);
 
     setState(() {
       _selectedStartNode = startNode;
@@ -549,7 +619,7 @@ class _NavigationScreenState extends State<NavigationScreen>
       _smoothedPoints = smoothed;
       _turnInstructions = instructions;
       _currentInstructionIndex = 0;
-      _userPosition = null;
+      _userPosition = initialPos;
       _walkedBreadcrumbs.clear();
       _isSimulatingWalk = false;
       _hasReachedDestination = false;
@@ -1035,6 +1105,11 @@ class _NavigationScreenState extends State<NavigationScreen>
                       currentInstructionIndex: _currentInstructionIndex,
                       userPosition: _userPosition,
                       walkedBreadcrumbs: _walkedBreadcrumbs,
+                      isCollapsed: _isMiniMapCollapsed,
+                      onToggleCollapse: () => setState(() => _isMiniMapCollapsed = !_isMiniMapCollapsed),
+                      collapsedLabel: _currentInstruction != null
+                          ? '${_currentInstruction!.distanceToTurn.toStringAsFixed(0)}m • Radar'
+                          : '2D Radar',
                       onTap: () => setState(() => _show2dFloorMap = true),
                     ),
                   ),

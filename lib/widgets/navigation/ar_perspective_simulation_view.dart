@@ -382,13 +382,13 @@ class ArPerspectivePainter extends CustomPainter {
       final chevronDistances = <double>[];
       if (hasReachedDestination) {
         // Destination arrived - silence arrows
-      } else if (visibleMeters > 0.4 && visibleMeters < 1.4) {
+      } else if (visibleMeters > 0.3 && visibleMeters < 1.0) {
         chevronDistances.add(startDist + visibleMeters * 0.5);
-      } else if (visibleMeters >= 1.4) {
-        // Physically spaced: 1 chevron every ~1.5m
-        const chevronInterval = 1.5;
-        // Start 0.65m in front of camera anchor so chevron is comfortably in view on the ground
-        for (double d = startDist + 0.65; d <= endDist - 0.35; d += chevronInterval) {
+      } else if (visibleMeters >= 1.0) {
+        // Continuous directing arrows spaced every ~1.0m directly in front of the user
+        const chevronInterval = 1.0;
+        // Start 0.45m in front of camera anchor so chevron is immediately in view in front of the user
+        for (double d = startDist + 0.45; d <= endDist - 0.25; d += chevronInterval) {
           chevronDistances.add(d);
         }
       } else if (screenOffsets.length >= 2) {

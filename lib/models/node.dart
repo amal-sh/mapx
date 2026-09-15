@@ -35,6 +35,8 @@ class MapNode {
   final NodeType type;
   final String label;
   final Position position;
+  /// Facing direction (yaw / azimuth) in radians when this node was mapped.
+  final double? heading;
 
   const MapNode({
     required this.id,
@@ -42,6 +44,7 @@ class MapNode {
     required this.type,
     required this.label,
     required this.position,
+    this.heading,
   });
 
   Map<String, dynamic> toJson() => {
@@ -50,6 +53,7 @@ class MapNode {
         'type': type.name,
         'label': label,
         'position': position.toJson(),
+        if (heading != null) 'heading': heading,
       };
 
   factory MapNode.fromJson(Map<String, dynamic> json) => MapNode(
@@ -61,5 +65,6 @@ class MapNode {
         ),
         label: json['label'] as String? ?? '',
         position: Position.fromJson(json['position'] as Map<String, dynamic>),
+        heading: (json['heading'] as num?)?.toDouble(),
       );
 }

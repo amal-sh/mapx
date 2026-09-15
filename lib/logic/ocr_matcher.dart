@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import '../models/edge.dart';
 import '../models/node.dart';
 
 /// Result of matching OCR extracted text against a set of candidate [MapNode]s.
@@ -173,4 +174,110 @@ class OcrMatcher {
 
     return null;
   }
+
+  /// Prunes candidate search space to a context-constrained topological neighborhood.
+  ///
+  /// Given the user's [activeNodes] (e.g. current waypoint or upcoming path nodes),
+  /// retrieves candidate nodes within [hopRadius] connected edges via [allEdges].
+  ///
+  /// If [activeNodes] is empty, falls back to returning all [allNodes].
+  /// This eliminates false positives from distant wings/floors and accelerates matching.
+  static List<MapNode> getContextConstrainedCandidates({
+    required List<MapNode> activeNodes,
+    required List<MapNode> allNodes,
+    required List<MapEdge> allEdges,
+    int hopRadius = 1,
+  }) {
+    if (activeNodes.isEmpty || allNodes.isEmpty) return allNodes;
+
+    final nodeMap = {for (final n in allNodes) n.id: n};
+    final candidateIds = <String>{for (final n in activeNodes) n.id};
+    var currentFrontier = Set<String>.from(candidateIds);
+
+    for (int hop = 0; hop < hopRadius; hop++) {
+      final nextFrontier = <String>{};
+      for (final edge in allEdges) {
+        if (currentFrontier.contains(edge.fromNodeId)) {
+          nextFrontier.add(edge.toNodeId);
+        }
+        if (currentFrontier.contains(edge.toNodeId)) {
+          nextFrontier.add(edge.fromNodeId);
+        }
+      }
+      candidateIds.addAll(nextFrontier);
+      currentFrontier = nextFrontier;
+    }
+
+    final results = <MapNode>[];
+    for (final id in candidateIds) {
+      final node = nodeMap[id];
+      if (node != null) {
+        results.add(node);
+      }
+    }
+
+    return results.isNotEmpty ? results : allNodes;
+  }
 }
+
+/// Multi-frame temporal voting buffer for landmark and doorplate OCR verification.
+///
+/// Prevents transient sensor noise, camera motion blur, or glancing angle misreads
+/// from triggering spurious position jumps or re-routes.
+///
+/// Requires [requiredVotes] consecutive or recent detections of the same candidate
+/// within [windowDuration] before confirming a match. Detections exceeding
+/// [instantConfidenceThreshold] trigger immediately without waiting.
+class TemporalOcrVotingBuffer {
+  TemporalOcrVotingBuffer({
+    this.requiredVotes = 2,
+    this.windowDuration = const Duration(milliseconds: 1500),
+    this.instantConfidenceThreshold = 0.90,
+  });
+
+  final int requiredVotes;
+  final Duration windowDuration;
+  final double instantConfidenceThreshold;
+
+  final Map<String, List<DateTime>> _voteHistory = {};
+
+  /// Records a detection vote for [nodeId] with [confidence].
+  ///
+  /// Returns `true` if verified (instant threshold met OR accumulated >= [requiredVotes] within [windowDuration]).
+  /// Upon returning `true`, clears history for [nodeId] to avoid duplicate triggers.
+  bool recordVote(String nodeId, double confidence, {DateTime? timestamp}) {
+    final now = timestamp ?? DateTime.now();
+
+    if (confidence >= instantConfidenceThreshold) {
+      _voteHistory.remove(nodeId);
+      return true;
+    }
+
+    final history = _voteHistory.putIfAbsent(nodeId, () => []);
+    // Prune stale votes outside the sliding temporal window
+    history.removeWhere((t) => now.difference(t) > windowDuration);
+    history.add(now);
+
+    if (history.length >= requiredVotes) {
+      _voteHistory.remove(nodeId);
+      return true;
+    }
+
+    return false;
+  }
+
+  /// Clears all accumulated votes.
+  void reset() {
+    _voteHistory.clear();
+  }
+
+  /// Returns current accumulated vote count for [nodeId] within [windowDuration].
+  int getVoteCount(String nodeId, {DateTime? timestamp}) {
+    final now = timestamp ?? DateTime.now();
+    final history = _voteHistory[nodeId];
+    if (history == null) return 0;
+    history.removeWhere((t) => now.difference(t) > windowDuration);
+    return history.length;
+  }
+}
+

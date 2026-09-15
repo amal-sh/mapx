@@ -130,5 +130,25 @@ void main() {
       expect(tracker.headingDegrees, closeTo(180.0, 1.0));
       expect(tracker.cardinalDirection, 'S');
     });
+
+    test('computeCircularAverage correctly resolves 0 <-> 360 wrap-around across North', () {
+      // 359° and 1° in radians
+      final deg359 = 359.0 * math.pi / 180.0;
+      final deg1 = 1.0 * math.pi / 180.0;
+      final deg358 = 358.0 * math.pi / 180.0;
+      final deg2 = 2.0 * math.pi / 180.0;
+
+      final avgRad = PhysicalOrientationTracker.computeCircularAverage([deg359, deg1, deg358, deg2]);
+      final avgDeg = avgRad * 180.0 / math.pi;
+
+      // Should be near 0° / 360° (North), NOT near 180° (South)
+      expect(avgDeg < 2.0 || avgDeg > 358.0, isTrue);
+
+      // Single element returns that element normalized
+      expect(PhysicalOrientationTracker.computeCircularAverage([deg1]), closeTo(deg1, 0.0001));
+
+      // Empty list returns 0
+      expect(PhysicalOrientationTracker.computeCircularAverage([]), 0.0);
+    });
   });
 }

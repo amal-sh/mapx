@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import '../models/edge.dart';
 import '../models/node.dart';
 import '../native/ar_bridge.dart';
 
@@ -75,8 +76,11 @@ class BezierSmoother {
 
   /// Smooths a list of [MapNode] waypoints into a continuous sequence of
   /// [SmoothedPathPoint]s.
+  /// If [edges] are provided and contain physical [MapEdge.footpath] points,
+  /// the intermediate footpath walked by the admin is integrated into the curve.
   static List<SmoothedPathPoint> smoothPath(
     List<MapNode> nodes, {
+    List<MapEdge>? edges,
     double stepDistance = defaultStepDistance,
     double heightOffset = defaultArrowHeight,
     double cornerRadius = maxCornerRadius,
@@ -97,10 +101,43 @@ class BezierSmoother {
       ];
     }
 
-    // Convert MapNodes into raw 3D vectors
-    final rawPoints = nodes
-        .map((n) => Vector3(n.position.x, n.position.y, n.position.z))
-        .toList();
+    // Convert MapNodes into raw 3D vectors, inserting intermediate physical footpaths from edges
+    final rawPoints = <Vector3>[];
+    if (edges != null && edges.isNotEmpty) {
+      for (int i = 0; i < nodes.length; i++) {
+        final curr = nodes[i];
+        rawPoints.add(Vector3(curr.position.x, curr.position.y, curr.position.z));
+        if (i < nodes.length - 1) {
+          final next = nodes[i + 1];
+          MapEdge? connectingEdge;
+          for (final e in edges) {
+            if ((e.fromNodeId == curr.id && e.toNodeId == next.id) ||
+                (e.fromNodeId == next.id && e.toNodeId == curr.id)) {
+              connectingEdge = e;
+              break;
+            }
+          }
+          if (connectingEdge != null &&
+              connectingEdge.footpath != null &&
+              connectingEdge.footpath!.isNotEmpty) {
+            final pathPoints = connectingEdge.fromNodeId == curr.id
+                ? connectingEdge.footpath!
+                : connectingEdge.footpath!.reversed.toList();
+            for (final p in pathPoints) {
+              final dCurr = p.distanceTo(curr.position);
+              final dNext = p.distanceTo(next.position);
+              if (dCurr > 0.15 && dNext > 0.15) {
+                rawPoints.add(Vector3(p.x, p.y, p.z));
+              }
+            }
+          }
+        }
+      }
+    } else {
+      rawPoints.addAll(
+        nodes.map((n) => Vector3(n.position.x, n.position.y, n.position.z)),
+      );
+    }
 
     // 1. Generate smoothed 3D polyline using quadratic Bezier curves at corners
     final curvePoints = _generateContinuousCurve(

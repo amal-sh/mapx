@@ -12,6 +12,7 @@ class BuildingCard extends StatelessWidget {
     required this.onNavigate,
     required this.onAdminMap,
     required this.onDelete,
+    this.onViewJson,
   });
 
   final Building building;
@@ -19,6 +20,7 @@ class BuildingCard extends StatelessWidget {
   final VoidCallback onNavigate;
   final VoidCallback onAdminMap;
   final VoidCallback onDelete;
+  final VoidCallback? onViewJson;
 
   @override
   Widget build(BuildContext context) {
@@ -77,11 +79,24 @@ class BuildingCard extends StatelessWidget {
                     icon: const Icon(CupertinoIcons.ellipsis_vertical, size: 18, color: Color(0xFF71717A)),
                     tooltip: 'Map options',
                     onSelected: (value) {
-                      if (value == 'delete') {
+                      if (value == 'view_json') {
+                        onViewJson?.call();
+                      } else if (value == 'delete') {
                         onDelete();
                       }
                     },
                     itemBuilder: (context) => [
+                      if (onViewJson != null)
+                        const PopupMenuItem(
+                          value: 'view_json',
+                          child: Row(
+                            children: [
+                              Icon(CupertinoIcons.doc_text_search, size: 18, color: Color(0xFF00E5FF)),
+                              SizedBox(width: 10),
+                              Text('View Map JSON', style: TextStyle(fontWeight: FontWeight.w500)),
+                            ],
+                          ),
+                        ),
                       const PopupMenuItem(
                         value: 'delete',
                         child: Row(

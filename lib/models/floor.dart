@@ -6,6 +6,8 @@ class Floor {
   final int level;
   final String name;
   final Position? originAnchor;
+  /// Initial heading / North reference orientation in radians at the floor origin.
+  final double? initialHeadingRadians;
 
   const Floor({
     required this.id,
@@ -13,6 +15,7 @@ class Floor {
     required this.level,
     required this.name,
     this.originAnchor,
+    this.initialHeadingRadians,
   });
 
   Map<String, dynamic> toJson() => {
@@ -21,6 +24,7 @@ class Floor {
         'level': level,
         'name': name,
         if (originAnchor != null) 'originAnchor': originAnchor!.toJson(),
+        if (initialHeadingRadians != null) 'initialHeadingRadians': initialHeadingRadians,
       };
 
   factory Floor.fromJson(Map<String, dynamic> json) => Floor(
@@ -31,5 +35,6 @@ class Floor {
         originAnchor: json['originAnchor'] != null
             ? Position.fromJson(json['originAnchor'] as Map<String, dynamic>)
             : null,
+        initialHeadingRadians: (json['initialHeadingRadians'] as num?)?.toDouble(),
       );
 }

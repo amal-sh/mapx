@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/edge.dart';
 import '../../models/node.dart';
+import 'map_json_viewer_dialog.dart';
 
 class MappingInspectorSheet extends StatelessWidget {
   const MappingInspectorSheet({
@@ -92,13 +94,35 @@ class MappingInspectorSheet extends StatelessWidget {
                           fontWeight: FontWeight.w700,
                         ),
                   ),
-                  Text(
-                    '${nodes.length} Nodes • ${edges.length} Edges',
-                    style: TextStyle(
-                      color: colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '${nodes.length} Nodes • ${edges.length} Edges',
+                        style: TextStyle(
+                          color: colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        tooltip: 'View JSON',
+                        icon: const Icon(CupertinoIcons.doc_text_search, size: 20),
+                        onPressed: () {
+                          const encoder = JsonEncoder.withIndent('  ');
+                          final data = {
+                            'nodes': nodes.map((n) => n.toJson()).toList(),
+                            'edges': edges.map((e) => e.toJson()).toList(),
+                          };
+                          MapJsonViewerDialog.show(
+                            context: context,
+                            title: 'Floor Graph JSON',
+                            jsonString: encoder.convert(data),
+                          );
+                        },
+                      ),
+                    ],
                   ),
                 ],
               ),

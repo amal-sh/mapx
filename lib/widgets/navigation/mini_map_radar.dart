@@ -17,6 +17,9 @@ class MiniMapRadar extends StatelessWidget {
   final Vector3? userPosition;
   final List<Position>? walkedBreadcrumbs;
   final VoidCallback onTap;
+  final bool isCollapsed;
+  final VoidCallback? onToggleCollapse;
+  final String? collapsedLabel;
 
   const MiniMapRadar({
     super.key,
@@ -28,10 +31,47 @@ class MiniMapRadar extends StatelessWidget {
     this.userPosition,
     this.walkedBreadcrumbs,
     required this.onTap,
+    this.isCollapsed = false,
+    this.onToggleCollapse,
+    this.collapsedLabel,
   });
 
   @override
   Widget build(BuildContext context) {
+    if (isCollapsed) {
+      return GestureDetector(
+        onTap: onToggleCollapse ?? onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.90),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.5), width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.4),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(CupertinoIcons.compass, color: Color(0xFF00E5FF), size: 16),
+              const SizedBox(width: 6),
+              Text(
+                collapsedLabel ?? '2D Radar',
+                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(width: 4),
+              const Icon(CupertinoIcons.chevron_up, color: Colors.white70, size: 12),
+            ],
+          ),
+        ),
+      );
+    }
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -65,6 +105,7 @@ class MiniMapRadar extends StatelessWidget {
                 isMiniMap: true,
               ),
             ),
+            // Top-right full 2D screen expansion indicator
             Positioned(
               top: 6,
               right: 6,
@@ -87,6 +128,23 @@ class MiniMapRadar extends StatelessWidget {
                 ),
               ),
             ),
+            // Top-left collapse button (Vertex cognitive-load minimization)
+            if (onToggleCollapse != null)
+              Positioned(
+                top: 6,
+                left: 6,
+                child: GestureDetector(
+                  onTap: onToggleCollapse,
+                  child: Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(CupertinoIcons.chevron_down, color: Colors.white70, size: 12),
+                  ),
+                ),
+              ),
           ],
         ),
       ),

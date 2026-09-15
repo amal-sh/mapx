@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -21,6 +22,7 @@ import '../native/ar_bridge.dart';
 import '../native/camera_permission.dart';
 import '../widgets/mapping/ar_mapping_perspective_painter.dart';
 import '../widgets/mapping/mapping_controls_bar.dart';
+import '../widgets/mapping/map_json_viewer_dialog.dart';
 import '../widgets/mapping/native_ar_scene_view.dart';
 import '../widgets/mapping/mapping_inspector_sheet.dart';
 import '../widgets/mapping/mapping_mini_map.dart';
@@ -624,19 +626,24 @@ class _AdminMappingScreenState extends State<AdminMappingScreen>
   }
 
   void _confirmDropNode(String label, NodeType type, Position position) {
-    final newNodeId = 'node_${DateTime.now().millisecondsSinceEpoch}';
+    final currentHeading = _orientationTracker.headingRadians;
+    final trail = _odometryTracker.consumeTrailSinceLastNode();
+
+    final newNodeId = 'node_${DateTime.now().microsecondsSinceEpoch}_${_nodes.length}';
     final newNode = MapNode(
       id: newNodeId,
       floorId: widget.floor.id,
       type: type,
       label: label,
       position: position,
+      heading: currentHeading,
     );
 
     setState(() {
       _nodes.add(newNode);
 
       // Auto-Breadcrumb linking: automatically connect to previously placed node with true Euclidean distance
+      // and attach the physical footpath coordinates walked by the admin
       if (_breadcrumbMode && _lastPlacedNode != null) {
         final distance = _lastPlacedNode!.position.distanceTo(position);
         final edge = MapEdge(
@@ -650,6 +657,7 @@ class _AdminMappingScreenState extends State<AdminMappingScreen>
               : type == NodeType.elevator
                   ? EdgeType.elevator
                   : EdgeType.walkable,
+          footpath: trail.isNotEmpty ? trail : null,
         );
         _edges.add(edge);
       }
@@ -789,7 +797,7 @@ class _AdminMappingScreenState extends State<AdminMappingScreen>
       await widget.repository.saveEdge(edge);
     }
 
-    // Set origin anchor on floor if first node exists
+    // Set origin anchor on floor if first node exists, preserving initial North heading
     if (_nodes.isNotEmpty) {
       final updatedFloor = Floor(
         id: widget.floor.id,
@@ -797,6 +805,7 @@ class _AdminMappingScreenState extends State<AdminMappingScreen>
         level: widget.floor.level,
         name: widget.floor.name,
         originAnchor: _nodes.first.position,
+        initialHeadingRadians: _nodes.first.heading ?? _orientationTracker.headingRadians,
       );
       await widget.repository.saveFloor(updatedFloor);
     }
@@ -810,6 +819,31 @@ class _AdminMappingScreenState extends State<AdminMappingScreen>
       );
       Navigator.of(context).pop(true);
     }
+  }
+
+  void _viewMapJson() {
+    const encoder = JsonEncoder.withIndent('  ');
+    final mapData = {
+      'building': widget.building.toJson(),
+      'floor': Floor(
+        id: widget.floor.id,
+        buildingId: widget.floor.buildingId,
+        level: widget.floor.level,
+        name: widget.floor.name,
+        originAnchor: _nodes.isNotEmpty ? _nodes.first.position : null,
+        initialHeadingRadians: _nodes.isNotEmpty
+            ? (_nodes.first.heading ?? _orientationTracker.headingRadians)
+            : null,
+      ).toJson(),
+      'nodes': _nodes.map((n) => n.toJson()).toList(),
+      'edges': _edges.map((e) => e.toJson()).toList(),
+    };
+    final jsonStr = encoder.convert(mapData);
+    MapJsonViewerDialog.show(
+      context: context,
+      title: '${widget.floor.name} Map JSON',
+      jsonString: jsonStr,
+    );
   }
 
   void _confirmClearFloorMap() {
@@ -969,11 +1003,23 @@ class _AdminMappingScreenState extends State<AdminMappingScreen>
             icon: const Icon(CupertinoIcons.ellipsis_vertical, size: 20),
             tooltip: 'Floor options',
             onSelected: (value) {
-              if (value == 'clear') {
+              if (value == 'view_json') {
+                _viewMapJson();
+              } else if (value == 'clear') {
                 _confirmClearFloorMap();
               }
             },
             itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'view_json',
+                child: Row(
+                  children: [
+                    Icon(CupertinoIcons.doc_text_search, size: 18, color: Color(0xFF00E5FF)),
+                    SizedBox(width: 10),
+                    Text('View Map JSON', style: TextStyle(fontWeight: FontWeight.w500)),
+                  ],
+                ),
+              ),
               PopupMenuItem(
                 value: 'clear',
                 enabled: _nodes.isNotEmpty || _edges.isNotEmpty,
